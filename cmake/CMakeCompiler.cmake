@@ -8,6 +8,7 @@ macro(setup_default_compiler_flags _project_name)
 		target_compile_options(${_project_name} PRIVATE /Zi)				# Add debug info
 		target_compile_options(${_project_name} PRIVATE /Oi)				# Generate intrinsic functions
 		target_compile_options(${_project_name} PRIVATE /WX)				# Treat warnings as errors
+		target_compile_options(${_project_name} PRIVATE /MP)				# Enable parallel compilation
 
 		if(MSVC_VERSION GREATER 1900)
 			# VS2017 and above
@@ -20,6 +21,7 @@ macro(setup_default_compiler_flags _project_name)
 			endif()
 		else()
 			add_definitions(-DACL_NO_INTRINSICS)
+			add_definitions(-DRTM_NO_INTRINSICS)
 		endif()
 
 		if(USE_POPCNT_INSTRUCTIONS)
@@ -48,6 +50,7 @@ macro(setup_default_compiler_flags _project_name)
 				endif()
 			else()
 				add_definitions(-DACL_NO_INTRINSICS)
+				add_definitions(-DRTM_NO_INTRINSICS)
 			endif()
 
 			if(USE_POPCNT_INSTRUCTIONS)

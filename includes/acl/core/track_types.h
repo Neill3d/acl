@@ -97,6 +97,99 @@ namespace acl
 
 	//////////////////////////////////////////////////////////////////////////
 
+	//////////////////////////////////////////////////////////////////////////
+	// We only support up to 4294967295 tracks. We reserve 4294967295 for the invalid index
+	constexpr uint32_t k_invalid_track_index = 0xFFFFFFFFu;
+
+	enum class track_type8 : uint8_t
+	{
+		float1f		= 0,
+		float2f		= 1,
+		float3f		= 2,
+		float4f		= 3,
+		vector4f	= 4,
+
+		//float1d	= 5,
+		//float2d	= 6,
+		//float3d	= 7,
+		//float4d	= 8,
+		//vector4d	= 9,
+
+		//quatf		= 10,
+		//quatd		= 11,
+
+		//qvvf		= 12,
+		//qvvd		= 13,
+
+		//int1i		= 14,
+		//int2i		= 15,
+		//int3i		= 16,
+		//int4i		= 17,
+		//vector4i	= 18,
+
+		//int1q		= 19,
+		//int2q		= 20,
+		//int3q		= 21,
+		//int4q		= 22,
+		//vector4q	= 23,
+	};
+
+	enum class track_category8 : uint8_t
+	{
+		scalarf		= 0,
+		//scalard	= 1,
+		//scalari	= 2,
+		//scalarq	= 3,
+		//transformf = 4,
+		//transformd = 5,
+	};
+
+	// Used by: float1f, float2f, float3f, float4f
+	struct track_desc_scalarf
+	{
+		static constexpr track_category8 category = track_category8::scalarf;
+
+		// The track output index. When writing out the compressed data stream, this index
+		// will be used instead of the track index. This allows custom reordering for things
+		// like LOD sorting or skeleton remapping. A value of 'k_invalid_track_index' will strip the track
+		// from the compressed data stream. Output indices must be unique and contiguous.
+		uint32_t output_index;
+
+		float precision;
+
+		// TODO: Use the precision?
+		float constant_threshold;
+	};
+
+#if 0	// TODO: Add support for this
+	// Used by: quatf, qvvf
+	struct track_desc_transformf
+	{
+		static constexpr track_category8 category = track_category8::transformf;
+
+		// The track output index. When writing out the compressed data stream, this index
+		// will be used instead of the track index. This allows custom reordering for things
+		// like LOD sorting or skeleton remapping. A value of 'k_invalid_track_index' will strip the track
+		// from the compressed data stream. Output indices must be unique and contiguous.
+		uint32_t output_index;
+
+		uint32_t parent_index;
+
+		float precision;
+
+		// TODO: Use the precision and shell distance?
+		float constant_rotation_threshold;
+		float constant_translation_threshold;
+		float constant_scale_threshold;
+
+		float shell_distance;
+	};
+#endif
+
+	// TODO: Add transform description?
+
+	//////////////////////////////////////////////////////////////////////////
+
 	// Bit rate 0 is reserved for tracks that are constant in a segment
 	constexpr uint8_t k_bit_rate_num_bits[] = { 0, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 32 };
 
@@ -295,6 +388,90 @@ namespace acl
 	constexpr bool is_vector_format_variable(VectorFormat8 format)
 	{
 		return format == VectorFormat8::Vector3_Variable;
+	}
+
+	// TODO: constexpr
+	inline const char* get_track_type_name(track_type8 type)
+	{
+		switch (type)
+		{
+		case track_type8::float1f:			return "float1f";
+		case track_type8::float2f:			return "float2f";
+		case track_type8::float3f:			return "float3f";
+		case track_type8::float4f:			return "float4f";
+		case track_type8::vector4f:			return "vector4f";
+		default:							return "<Invalid>";
+		}
+	}
+
+	inline bool get_track_type(const char* type, track_type8& out_type)
+	{
+		const char* float1f_type = "float1f";
+		if (std::strncmp(type, float1f_type, std::strlen(float1f_type)) == 0)
+		{
+			out_type = track_type8::float1f;
+			return true;
+		}
+
+		const char* float2f_type = "float2f";
+		if (std::strncmp(type, float2f_type, std::strlen(float2f_type)) == 0)
+		{
+			out_type = track_type8::float2f;
+			return true;
+		}
+
+		const char* float3f_type = "float3f";
+		if (std::strncmp(type, float3f_type, std::strlen(float3f_type)) == 0)
+		{
+			out_type = track_type8::float3f;
+			return true;
+		}
+
+		const char* float4f_type = "float4f";
+		if (std::strncmp(type, float4f_type, std::strlen(float4f_type)) == 0)
+		{
+			out_type = track_type8::float4f;
+			return true;
+		}
+
+		const char* vector4f_type = "vector4f";
+		if (std::strncmp(type, vector4f_type, std::strlen(vector4f_type)) == 0)
+		{
+			out_type = track_type8::vector4f;
+			return true;
+		}
+
+		return false;
+	}
+
+	// TODO: constexpr
+	inline track_category8 get_track_category(track_type8 type)
+	{
+		switch (type)
+		{
+		default:
+		case track_type8::float1f:		return track_category8::scalarf;
+		case track_type8::float2f:		return track_category8::scalarf;
+		case track_type8::float3f:		return track_category8::scalarf;
+		case track_type8::float4f:		return track_category8::scalarf;
+		case track_type8::vector4f:		return track_category8::scalarf;
+		}
+	}
+
+	// TODO: constexpr
+	inline uint32_t get_track_num_sample_elements(track_type8 type)
+	{
+		switch (type)
+		{
+		case track_type8::float1f:		return 1;
+		case track_type8::float2f:		return 2;
+		case track_type8::float3f:		return 3;
+		case track_type8::float4f:		return 4;
+		case track_type8::vector4f:		return 4;
+		default:
+			ACL_ASSERT(false, "Unsupported track type");
+			return 0;
+		}
 	}
 }
 

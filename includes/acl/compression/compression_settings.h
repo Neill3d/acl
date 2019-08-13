@@ -269,6 +269,15 @@ namespace acl
 		settings.segmenting.range_reduction = RangeReductionFlags8::AllTracks;
 		return settings;
 	}
+
+	struct tracks_compression_settings
+	{
+		bool range_reduction;
+
+		tracks_compression_settings()
+			: range_reduction(true)
+		{}
+	};
 }
 
 ACL_IMPL_FILE_PRAGMA_POP

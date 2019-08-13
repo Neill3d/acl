@@ -128,7 +128,7 @@ namespace acl
 		const AnimationClip& clip, const CompressionSettings& settings, DecompressionContextType& context)
 	{
 		ACL_ASSERT(settings.error_metric != nullptr, "Error metric cannot be null");
-		calculate_compressed_clip_error(allocator, clip, *settings.error_metric, context);
+		return calculate_compressed_clip_error(allocator, clip, *settings.error_metric, context);
 	}
 }
 
