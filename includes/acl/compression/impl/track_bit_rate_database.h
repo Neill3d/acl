@@ -63,6 +63,9 @@ namespace acl
 			inline void build(uint32_t track_index, const BoneBitRate* bit_rates, const BoneStreams* bone_streams);
 
 		private:
+			hierarchical_track_query(const hierarchical_track_query&) = delete;
+			hierarchical_track_query& operator=(const hierarchical_track_query&) = delete;
+
 			struct transform_indices
 			{
 				uint32_t	rotation_cache_index;
@@ -126,6 +129,25 @@ namespace acl
 		//////////////////////////////////////////////////////////////////////////
 		// This class manages bit rate queries against tracks.
 		// It will cache recently requested bit rates to speed up repeating queries.
+		// Memory layout:
+		//    track 0
+		//        rotation
+		//            entry 0		0
+		//            entry 1		1
+		//            entry 2		2
+		//            entry 3		3
+		//        translation
+		//            entry 0		4
+		//            entry 1		5
+		//            entry 2		6
+		//            entry 3		7
+		//        scale (optional)
+		//            entry 0		8
+		//            entry 1		9
+		//            entry 2		10
+		//            entry 3		11
+		//    track 1
+		// ...
 		//////////////////////////////////////////////////////////////////////////
 		class track_bit_rate_database
 		{
@@ -315,8 +337,8 @@ namespace acl
 			m_track_entry_bitsets = allocate_type_array<uint32_t>(allocator, track_bitsets_size);
 			m_track_bitsets_size = track_bitsets_size;
 
-			// We allocate a single float buffer to accommodate 4 bit rates for every rot/trans/scale track of each transform.
-			// Each track is padded and aligned to ensure that it starts on a cache line boundary.
+			// We allocate a single float buffer to accommodate 4 bit rates for every rot/trans/scale of each transform track.
+			// Each sub-track is padded and aligned to ensure that it starts on a cache line boundary.
 			const uint32_t track_size = align_to<uint32_t>(sizeof(Vector4_32) * num_samples_per_track, 64);
 			m_track_size = track_size;
 
@@ -355,26 +377,6 @@ namespace acl
 
 		inline void track_bit_rate_database::find_cache_entries(uint32_t track_index, const BoneBitRate& bit_rates, uint32_t& out_rotation_cache_index, uint32_t& out_translation_cache_index, uint32_t& out_scale_cache_index)
 		{
-			// Memory layout:
-			//    track 0
-			//        rotation
-			//            entry 0		0
-			//            entry 1		1
-			//            entry 2		2
-			//            entry 3		3
-			//        translation
-			//            entry 0		4
-			//            entry 1		5
-			//            entry 2		6
-			//            entry 3		7
-			//        scale
-			//            entry 0		8
-			//            entry 1		9
-			//            entry 2		10
-			//            entry 3		11
-			//    track 1
-			// ...
-
 			const uint32_t num_entries_per_transform = m_num_entries_per_transform;
 			const uint32_t base_track_offset = track_index * num_entries_per_transform;
 			const uint32_t base_rotation_offset = base_track_offset + (0 * k_num_bit_rates_cached_per_track);

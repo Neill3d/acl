@@ -86,6 +86,76 @@ namespace acl
 		deallocate_type_array(allocator, segment.bone_streams, segment.num_bones);
 		deallocate_type_array(allocator, segment.ranges, segment.num_bones);
 	}
+
+	namespace acl_impl
+	{
+		class track_database;
+
+		struct qvvf_ranges
+		{
+			float rotation_min[4];
+			float rotation_max[4];
+			float rotation_extent[4];
+
+			float translation_min[3];
+			float translation_max[3];
+			float translation_extent[3];
+
+			float scale_min[3];
+			float scale_max[3];
+			float scale_extent[3];
+
+			bool is_rotation_constant;
+			bool is_rotation_default;
+
+			bool is_translation_constant;
+			bool is_translation_default;
+
+			bool is_scale_constant;
+			bool is_scale_default;
+		};
+
+		struct segment_context
+		{
+			track_database* raw_database;				// Parent raw track database
+			track_database* mutable_database;			// Parent mutable track database
+			qvvf_ranges* ranges;						// Range information for every track in this segment
+
+			uint32_t index;								// Which segment this is
+			uint32_t num_transforms;					// Number of transforms (same in every segment)
+
+			uint32_t start_offset;						// The offset of the first sample in the parent clip
+			uint32_t num_samples_per_track;				// How many samples are in this segment per track
+
+			uint32_t num_simd_samples_per_track;		// The number of samples per track rounded up to SIMD width
+			uint32_t num_soa_entries;					// Number of SOA vector entries per component (num simd samples per track / simd width)
+			uint32_t soa_size;							// The size in bytes of the segment data in SOA form
+			uint32_t soa_start_offset;					// The start offset in bytes of the segment data in SOA form relative to the start of the contiguous buffer
+
+			SampleDistribution8 distribution;
+
+			bool are_rotations_normalized;
+			bool are_translations_normalized;
+			bool are_scales_normalized;
+
+			// Stat tracking
+			uint32_t animated_pose_bit_size;
+			uint32_t animated_data_size;
+			uint32_t range_data_size;
+			uint32_t total_header_size;
+		};
+
+		inline void destroy_segments(IAllocator& allocator, segment_context* segments, uint32_t num_segments)
+		{
+			for (uint32_t segment_index = 0; segment_index < num_segments; ++segment_index)
+			{
+				segment_context& segment = segments[segment_index];
+				deallocate_type_array(allocator, segment.ranges, segment.num_transforms);
+			}
+
+			deallocate_type_array(allocator, segments, num_segments);
+		}
+	}
 }
 
 ACL_IMPL_FILE_PRAGMA_POP

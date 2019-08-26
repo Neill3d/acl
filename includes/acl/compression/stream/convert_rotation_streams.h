@@ -30,6 +30,7 @@
 #include "acl/math/quat_32.h"
 #include "acl/math/vector4_32.h"
 #include "acl/compression/stream/clip_context.h"
+#include "acl/compression/impl/track_database.h"
 
 #include <cstdint>
 
@@ -63,7 +64,7 @@ namespace acl
 
 		for (BoneStreams& bone_stream : segment.bone_iterator())
 		{
-			// We convert our rotation stream in place. We assume that the original format is Quat_128 stored at Quat_32
+			// We convert our rotation stream in place. We assume that the original format is Quat_128 stored as Quat_32
 			// For all other formats, we keep the same sample size and either keep Quat_32 or use Vector4_32
 			ACL_ASSERT(bone_stream.rotations.get_sample_size() == sizeof(Quat_32), "Unexpected rotation sample size. %u != %u", bone_stream.rotations.get_sample_size(), sizeof(Quat_32));
 
@@ -100,6 +101,51 @@ namespace acl
 	{
 		for (SegmentContext& segment : clip_context.segment_iterator())
 			convert_rotation_streams(allocator, segment, rotation_format);
+	}
+
+	namespace acl_impl
+	{
+		inline void quat_ensure_positive_w_soa(Vector4_32& rotations_x, Vector4_32& rotations_y, Vector4_32& rotations_z, Vector4_32& rotations_w)
+		{
+			// result =  quat_get_w(input) >= 0.f ? input : quat_neg(input);
+			const Vector4_32 w_positive_mask = vector_greater_equal(rotations_w, vector_zero_32());
+			rotations_x = vector_blend(w_positive_mask, rotations_x, vector_neg(rotations_x));
+			rotations_y = vector_blend(w_positive_mask, rotations_y, vector_neg(rotations_y));
+			rotations_z = vector_blend(w_positive_mask, rotations_z, vector_neg(rotations_z));
+			rotations_w = vector_blend(w_positive_mask, rotations_w, vector_neg(rotations_w));
+		}
+
+		inline void convert_rotations(track_database& database, const segment_context& segment, RotationFormat8 rotation_format)
+		{
+			// We convert our rotations in place. We assume that the original format is RotationFormat8::Quat_128 stored as Quat_32
+			const RotationVariant8 rotation_variant = get_rotation_variant(rotation_format);
+			if (rotation_variant == RotationVariant8::Quat)
+				return;	// Nothing to do
+
+			ACL_ASSERT(rotation_variant == RotationVariant8::QuatDropW, "Unexpected variant");
+
+			const uint32_t num_transforms = database.get_num_transforms();
+			const uint32_t num_soa_entries = segment.num_soa_entries;
+			for (uint32_t transform_index = 0; transform_index < num_transforms; ++transform_index)
+			{
+				Vector4_32* rotations_x;
+				Vector4_32* rotations_y;
+				Vector4_32* rotations_z;
+				Vector4_32* rotations_w;
+				database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
+
+				// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+				// TODO: Trivial AVX or ISPC conversion
+				for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+				{
+					// Drop W, we just ensure it is positive and write it back, the W component can be ignored and trivially reconstructed afterwards
+					quat_ensure_positive_w_soa(rotations_x[entry_index], rotations_y[entry_index], rotations_z[entry_index], rotations_w[entry_index]);
+
+					const uint32_t next_entry_index = entry_index + 1;
+					quat_ensure_positive_w_soa(rotations_x[next_entry_index], rotations_y[next_entry_index], rotations_z[next_entry_index], rotations_w[next_entry_index]);
+				}
+			}
+		}
 	}
 }
 

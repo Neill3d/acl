@@ -38,6 +38,7 @@
 #include "acl/compression/skeleton.h"
 #include "acl/compression/animation_clip.h"
 #include "acl/compression/output_stats.h"
+#include "acl/compression/impl/track_database.h"
 #include "acl/compression/stream/clip_context.h"
 #include "acl/compression/stream/track_stream.h"
 #include "acl/compression/stream/convert_rotation_streams.h"
@@ -79,6 +80,7 @@ namespace acl
 		inline ErrorResult compress_clip(IAllocator& allocator, const AnimationClip& clip, CompressionSettings settings, CompressedClip*& out_compressed_clip, OutputStats& out_stats)
 		{
 			using namespace impl;
+			using namespace acl_impl;
 			(void)out_stats;
 
 			ErrorResult error_result = clip.is_valid();
@@ -92,6 +94,7 @@ namespace acl
 			ScopeProfiler compression_time;
 
 			const uint32_t num_samples = clip.get_num_samples();
+			const uint32_t num_transforms = clip.get_num_bones();
 			const RigidSkeleton& skeleton = clip.get_skeleton();
 
 			ClipContext additive_base_clip_context;
@@ -104,6 +107,52 @@ namespace acl
 
 			ClipContext clip_context;
 			initialize_clip_context(allocator, clip, skeleton, settings, clip_context);
+
+			const bool has_scale = clip.has_scale(settings.constant_scale_threshold);
+
+			uint32_t num_segments;
+			segment_context* segments = partition_into_segments(allocator, num_samples, num_transforms, has_scale, settings.segmenting, num_segments);
+
+			// If we have a single segment or segmenting is disabled, disable range reduction since it won't help
+			if (!settings.segmenting.enabled || num_segments == 1)
+				settings.segmenting.range_reduction = RangeReductionFlags8::None;
+
+			track_database raw_track_database(allocator, clip, skeleton, settings, segments, num_segments);
+			track_database mutable_track_database(allocator, clip, skeleton, settings, segments, num_segments);	// TODO: direct memcpy from raw
+
+			// Process every segment, this could be done in parallel
+			for (uint32_t segment_index = 0; segment_index < num_segments; ++segment_index)
+			{
+				segment_context& segment = segments[segment_index];
+				segment.raw_database = &raw_track_database;
+				segment.mutable_database = &mutable_track_database;
+
+				// TODO: Should we also convert the raw database?
+				convert_rotations(mutable_track_database, segment, settings.rotation_format);
+
+				// Extract segment ranges, we'll merge them after the loop
+				extract_database_transform_ranges_per_segment(mutable_track_database, segment);
+			}
+
+			merge_database_transform_ranges_from_segments(mutable_track_database, segments, num_segments);
+			detect_constant_tracks(mutable_track_database, segments, num_segments, settings.constant_rotation_threshold_angle, settings.constant_translation_threshold, settings.constant_scale_threshold);
+
+			// Process every segment, this could be done in parallel
+			for (uint32_t segment_index = 0; segment_index < num_segments; ++segment_index)
+			{
+#if 0
+				if (settings.range_reduction != RangeReductionFlags8::None)
+					normalize_clip_streams(clip_context, settings.range_reduction);
+
+				if (settings.segmenting.enabled && settings.segmenting.range_reduction != RangeReductionFlags8::None)
+				{
+					extract_segment_bone_ranges(allocator, clip_context);
+					normalize_segment_streams(clip_context, settings.range_reduction);
+				}
+
+				quantize_streams(allocator, clip_context, settings, skeleton, raw_clip_context, additive_base_clip_context);
+#endif
+			}
 
 			convert_rotation_streams(allocator, clip_context, settings.rotation_format);
 
@@ -123,10 +172,6 @@ namespace acl
 			if (settings.segmenting.enabled)
 			{
 				segment_streams(allocator, clip_context, settings.segmenting);
-
-				// If we have a single segment, disable range reduction since it won't help
-				if (clip_context.num_segments == 1)
-					settings.segmenting.range_reduction = RangeReductionFlags8::None;
 
 				if (settings.segmenting.range_reduction != RangeReductionFlags8::None)
 				{
@@ -267,6 +312,7 @@ namespace acl
 #endif
 
 			deallocate_type_array(allocator, output_bone_mapping, num_output_bones);
+			destroy_segments(allocator, segments, num_segments);
 			destroy_clip_context(allocator, clip_context);
 			destroy_clip_context(allocator, raw_clip_context);
 

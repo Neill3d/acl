@@ -33,6 +33,7 @@
 #include "acl/math/quat_32.h"
 #include "acl/math/vector4_32.h"
 #include "acl/compression/stream/clip_context.h"
+#include "acl/compression/impl/track_database.h"
 
 #include <cstdint>
 
@@ -382,6 +383,210 @@ namespace acl
 			}
 
 			segment.range_data_size = range_data_size;
+		}
+	}
+
+	namespace acl_impl
+	{
+		inline float ACL_SIMD_CALL get_min_component(Vector4_32Arg0 input)
+		{
+#if defined(ACL_SSE2_INTRINSICS)
+			__m128 zwzw = _mm_movehl_ps(input, input);
+			__m128 xz_yw_zz_ww = _mm_min_ps(input, zwzw);
+			__m128 yw_yw_yw_yw = _mm_shuffle_ps(xz_yw_zz_ww, xz_yw_zz_ww, _MM_SHUFFLE(1, 1, 1, 1));
+			return _mm_cvtss_f32(_mm_min_ps(xz_yw_zz_ww, yw_yw_yw_yw));
+#elif defined(ACL_NEON_INTRINSICS)
+			float32x2_t xy_zw = vpmin_f32(vget_low_f32(input), vget_high_f32(input));
+			return vget_lane_f32(vpmin_f32(xy_zw, xy_zw), 0);
+#else
+			return scalar_min(scalar_min(input.x, input.y), scalar_min(input.z, input.w));
+#endif
+		}
+
+		inline float ACL_SIMD_CALL get_max_component(Vector4_32Arg0 input)
+		{
+#if defined(ACL_SSE2_INTRINSICS)
+			__m128 zwzw = _mm_movehl_ps(input, input);
+			__m128 xz_yw_zz_ww = _mm_max_ps(input, zwzw);
+			__m128 yw_yw_yw_yw = _mm_shuffle_ps(xz_yw_zz_ww, xz_yw_zz_ww, _MM_SHUFFLE(1, 1, 1, 1));
+			return _mm_cvtss_f32(_mm_max_ps(xz_yw_zz_ww, yw_yw_yw_yw));
+#elif defined(ACL_NEON_INTRINSICS)
+			float32x2_t xy_zw = vpmax_f32(vget_low_f32(input), vget_high_f32(input));
+			return vget_lane_f32(vpmax_f32(xy_zw, xy_zw), 0);
+#else
+			return scalar_max(scalar_max(input.x, input.y), scalar_max(input.z, input.w));
+#endif
+		}
+
+		inline void extract_vector4f_range(Vector4_32* inputs_x, Vector4_32* inputs_y, Vector4_32* inputs_z, Vector4_32* inputs_w, uint32_t num_soa_entries, float out_range_min[4], float out_range_max[4])
+		{
+			const Vector4_32 range_min_value = vector_set(1e10f);
+			const Vector4_32 range_max_value = vector_set(-1e10f);
+
+			Vector4_32 input_min_x = range_min_value;
+			Vector4_32 input_min_y = range_min_value;
+			Vector4_32 input_min_z = range_min_value;
+			Vector4_32 input_min_w = range_min_value;
+
+			Vector4_32 input_max_x = range_max_value;
+			Vector4_32 input_max_y = range_max_value;
+			Vector4_32 input_max_z = range_max_value;
+			Vector4_32 input_max_w = range_max_value;
+
+			// TODO: Trivial AVX or ISPC conversion
+			for (uint32_t entry_index = 0; entry_index < num_soa_entries; ++entry_index)
+			{
+				input_min_x = vector_min(input_min_x, inputs_x[entry_index]);
+				input_max_x = vector_max(input_max_x, inputs_x[entry_index]);
+
+				input_min_y = vector_min(input_min_y, inputs_y[entry_index]);
+				input_max_y = vector_max(input_max_y, inputs_y[entry_index]);
+
+				input_min_z = vector_min(input_min_z, inputs_z[entry_index]);
+				input_max_z = vector_max(input_max_z, inputs_z[entry_index]);
+
+				input_min_w = vector_min(input_min_w, inputs_w[entry_index]);
+				input_max_w = vector_max(input_max_w, inputs_w[entry_index]);
+			}
+
+			out_range_min[0] = get_min_component(input_min_x);
+			out_range_min[1] = get_min_component(input_min_y);
+			out_range_min[2] = get_min_component(input_min_z);
+			out_range_min[3] = get_min_component(input_min_w);
+
+			out_range_max[0] = get_max_component(input_max_x);
+			out_range_max[1] = get_max_component(input_max_y);
+			out_range_max[2] = get_max_component(input_max_z);
+			out_range_max[3] = get_max_component(input_max_w);
+		}
+
+		inline void extract_vector3f_range(Vector4_32* inputs_x, Vector4_32* inputs_y, Vector4_32* inputs_z, uint32_t num_soa_entries, float out_range_min[3], float out_range_max[3])
+		{
+			const Vector4_32 range_min_value = vector_set(1e10f);
+			const Vector4_32 range_max_value = vector_set(-1e10f);
+
+			Vector4_32 input_min_x = range_min_value;
+			Vector4_32 input_min_y = range_min_value;
+			Vector4_32 input_min_z = range_min_value;
+
+			Vector4_32 input_max_x = range_max_value;
+			Vector4_32 input_max_y = range_max_value;
+			Vector4_32 input_max_z = range_max_value;
+
+			// TODO: Trivial AVX or ISPC conversion
+			for (uint32_t entry_index = 0; entry_index < num_soa_entries; ++entry_index)
+			{
+				input_min_x = vector_min(input_min_x, inputs_x[entry_index]);
+				input_max_x = vector_max(input_max_x, inputs_x[entry_index]);
+
+				input_min_y = vector_min(input_min_y, inputs_y[entry_index]);
+				input_max_y = vector_max(input_max_y, inputs_y[entry_index]);
+
+				input_min_z = vector_min(input_min_z, inputs_z[entry_index]);
+				input_max_z = vector_max(input_max_z, inputs_z[entry_index]);
+			}
+
+			out_range_min[0] = get_min_component(input_min_x);
+			out_range_min[1] = get_min_component(input_min_y);
+			out_range_min[2] = get_min_component(input_min_z);
+
+			out_range_max[0] = get_max_component(input_max_x);
+			out_range_max[1] = get_max_component(input_max_y);
+			out_range_max[2] = get_max_component(input_max_z);
+		}
+
+		inline void extract_database_transform_ranges_per_segment(track_database& database, segment_context& segment)
+		{
+			Vector4_32 zero = vector_zero_32();
+
+			const bool has_scale = database.has_scale();
+			const uint32_t num_transforms = database.get_num_transforms();
+			const uint32_t num_soa_entries = segment.num_soa_entries;
+			for (uint32_t transform_index = 0; transform_index < num_transforms; ++transform_index)
+			{
+				qvvf_ranges& range = segment.ranges[transform_index];
+
+				Vector4_32* rotations_x;
+				Vector4_32* rotations_y;
+				Vector4_32* rotations_z;
+				Vector4_32* rotations_w;
+				database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
+
+				extract_vector4f_range(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries, range.rotation_min, range.rotation_max);
+				vector_unaligned_write(vector_sub(vector_unaligned_load(range.rotation_min), vector_unaligned_load(range.rotation_max)), range.rotation_extent);
+
+				Vector4_32* translations_x;
+				Vector4_32* translations_y;
+				Vector4_32* translations_z;
+				database.get_translations(segment, transform_index, translations_x, translations_y, translations_z);
+
+				extract_vector3f_range(translations_x, translations_y, translations_z, num_soa_entries, range.translation_min, range.translation_max);
+				vector_unaligned_write3(vector_sub(vector_unaligned_load3(range.translation_min), vector_unaligned_load3(range.translation_max)), range.translation_extent);
+
+				if (has_scale)
+				{
+					Vector4_32* scales_x;
+					Vector4_32* scales_y;
+					Vector4_32* scales_z;
+					database.get_scales(segment, transform_index, scales_x, scales_y, scales_z);
+
+					extract_vector3f_range(scales_x, scales_y, scales_z, num_soa_entries, range.scale_min, range.scale_max);
+					vector_unaligned_write3(vector_sub(vector_unaligned_load3(range.scale_min), vector_unaligned_load3(range.scale_max)), range.scale_extent);
+				}
+				else
+				{
+					vector_unaligned_write3(zero, range.scale_min);
+					vector_unaligned_write3(zero, range.scale_max);
+					vector_unaligned_write3(zero, range.scale_extent);
+				}
+			}
+		}
+
+		inline void merge_database_transform_ranges_from_segments(track_database& database, segment_context* segments, uint32_t num_segments)
+		{
+			const Vector4_32 range_min_value = vector_set(1e10f);
+			const Vector4_32 range_max_value = vector_set(-1e10f);
+
+			const uint32_t num_transforms = database.get_num_transforms();
+			for (uint32_t transform_index = 0; transform_index < num_transforms; ++transform_index)
+			{
+				Vector4_32 rotation_range_min = range_min_value;
+				Vector4_32 rotation_range_max = range_max_value;
+				Vector4_32 translation_range_min = range_min_value;
+				Vector4_32 translation_range_max = range_max_value;
+				Vector4_32 scale_range_min = range_min_value;
+				Vector4_32 scale_range_max = range_max_value;
+
+				for (uint32_t segment_index = 0; segment_index < num_segments; ++segment_index)
+				{
+					const segment_context& segment = segments[segment_index];
+					const qvvf_ranges& segment_transform_range = segment.ranges[transform_index];
+
+					rotation_range_min = vector_min(rotation_range_min, vector_unaligned_load(segment_transform_range.rotation_min));
+					rotation_range_max = vector_max(rotation_range_max, vector_unaligned_load(segment_transform_range.rotation_max));
+					translation_range_min = vector_min(translation_range_min, vector_unaligned_load3(segment_transform_range.translation_min));
+					translation_range_max = vector_max(translation_range_max, vector_unaligned_load3(segment_transform_range.translation_max));
+					scale_range_min = vector_min(scale_range_min, vector_unaligned_load3(segment_transform_range.scale_min));
+					scale_range_max = vector_max(scale_range_max, vector_unaligned_load3(segment_transform_range.scale_max));
+				}
+
+				qvvf_ranges& clip_transform_range = database.get_range(transform_index);
+
+				const Vector4_32 rotation_range_extent = vector_sub(rotation_range_max, rotation_range_min);
+				vector_unaligned_write(rotation_range_min, clip_transform_range.rotation_min);
+				vector_unaligned_write(rotation_range_max, clip_transform_range.rotation_max);
+				vector_unaligned_write(rotation_range_extent, clip_transform_range.rotation_extent);
+
+				const Vector4_32 translation_range_extent = vector_sub(translation_range_max, translation_range_min);
+				vector_unaligned_write3(translation_range_min, clip_transform_range.translation_min);
+				vector_unaligned_write3(translation_range_max, clip_transform_range.translation_max);
+				vector_unaligned_write3(translation_range_extent, clip_transform_range.translation_extent);
+
+				const Vector4_32 scale_range_extent = vector_sub(scale_range_max, scale_range_min);
+				vector_unaligned_write3(scale_range_min, clip_transform_range.scale_min);
+				vector_unaligned_write3(scale_range_max, clip_transform_range.scale_max);
+				vector_unaligned_write3(scale_range_extent, clip_transform_range.scale_extent);
+			}
 		}
 	}
 }
