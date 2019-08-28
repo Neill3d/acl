@@ -42,7 +42,8 @@ namespace acl
 {
 	namespace acl_impl
 	{
-		static constexpr uint32_t k_simd_width = 8;		// SIMD with on NEON and SSE is 4 but we dual pump some parts
+		static constexpr uint32_t k_simd_width			= 4;		// NEON/SSE width for now
+		static constexpr uint32_t k_simd_padding_width	= 8;		// Twice the width to support interleaving two iterations when possible
 
 		constexpr uint32_t get_num_components_per_transform(bool has_scale)
 		{

@@ -418,6 +418,17 @@ namespace acl
 #endif
 		}
 
+		inline Vector4_32 ACL_SIMD_CALL vector_broadcast(const float* input)
+		{
+#if defined(ACL_SSE2_INTRINSICS)
+			return _mm_load_ps1(input);
+#elif defined(ACL_NEON_INTRINSICS)
+			return vld1q_dup_f32(input);
+#else
+			return vector_set(*input);
+#endif
+		}
+
 		inline void extract_vector4f_range(Vector4_32* inputs_x, Vector4_32* inputs_y, Vector4_32* inputs_z, Vector4_32* inputs_w, uint32_t num_soa_entries, float out_range_min[4], float out_range_max[4])
 		{
 			const Vector4_32 range_min_value = vector_set(1e10f);
@@ -497,7 +508,7 @@ namespace acl
 
 		inline void extract_database_transform_ranges_per_segment(track_database& database, segment_context& segment)
 		{
-			Vector4_32 zero = vector_zero_32();
+			const Vector4_32 zero = vector_zero_32();
 
 			const bool has_scale = database.has_scale();
 			const uint32_t num_transforms = database.get_num_transforms();
@@ -542,6 +553,133 @@ namespace acl
 			}
 		}
 
+		inline void extract_segment_ranges(track_database& database, segment_context& segment)
+		{
+			const Vector4_32 one = vector_set(1.0f);
+			const Vector4_32 zero = vector_zero_32();
+			const float max_range_value_flt = float((1 << k_segment_range_reduction_num_bits_per_component) - 1);
+			const Vector4_32 max_range_value = vector_set(max_range_value_flt);
+			const Vector4_32 inv_max_range_value = vector_set(1.0f / max_range_value_flt);
+
+			// Segment ranges are always normalized and live between [0.0 ... 1.0]
+
+			auto fixup_range = [&](Vector4_32& range_min, Vector4_32& range_max, Vector4_32& out_range_extent)
+			{
+				// In our compressed format, we store the minimum value of the track range quantized on 8 bits.
+				// To get the best accuracy, we pick the value closest to the true minimum that is slightly lower.
+				// This is to ensure that we encompass the lowest value even after quantization.
+				const Vector4_32 scaled_min = vector_mul(range_min, max_range_value);
+				const Vector4_32 quantized_min0 = vector_clamp(vector_floor(scaled_min), zero, max_range_value);
+				const Vector4_32 quantized_min1 = vector_max(vector_sub(quantized_min0, one), zero);
+
+				const Vector4_32 padded_range_min0 = vector_mul(quantized_min0, inv_max_range_value);
+				const Vector4_32 padded_range_min1 = vector_mul(quantized_min1, inv_max_range_value);
+
+				// Check if min0 is below or equal to our original range minimum value, if it is, it is good
+				// enough to use otherwise min1 is guaranteed to be lower.
+				const Vector4_32 is_min0_lower_mask = vector_less_equal(padded_range_min0, range_min);
+				const Vector4_32 padded_range_min = vector_blend(is_min0_lower_mask, padded_range_min0, padded_range_min1);
+
+				// The story is different for the extent. We do not store the max, instead we use the extent
+				// for performance reasons: a single mul/add is required to reconstruct the original value.
+				// Now that our minimum value changed, our extent also changed.
+				// We want to pick the extent value that brings us closest to our original max value while
+				// being slightly larger to encompass it.
+				const Vector4_32 range_extent_with_new_min = vector_sub(range_max, padded_range_min);
+				const Vector4_32 scaled_extent = vector_mul(range_extent_with_new_min, max_range_value);
+				const Vector4_32 quantized_extent0 = vector_clamp(vector_ceil(scaled_extent), zero, max_range_value);
+				const Vector4_32 quantized_extent1 = vector_min(vector_add(quantized_extent0, one), max_range_value);
+
+				const Vector4_32 padded_range_extent0 = vector_mul(quantized_extent0, inv_max_range_value);
+				const Vector4_32 padded_range_extent1 = vector_mul(quantized_extent1, inv_max_range_value);
+
+				// Check if extent0 is above or equal to our original range maximum value, if it is, it is good
+				// enough to use otherwise extent1 is guaranteed to be higher.
+				const Vector4_32 is_extent0_higher_mask = vector_greater_equal(padded_range_extent0, range_max);
+				const Vector4_32 padded_range_extent = vector_blend(is_extent0_higher_mask, padded_range_extent0, padded_range_extent1);
+
+				range_min = padded_range_min;
+				range_max = vector_add(padded_range_min, padded_range_extent);
+				out_range_extent = padded_range_extent;
+			};
+
+			const bool has_scale = database.has_scale();
+			const uint32_t num_transforms = database.get_num_transforms();
+			const uint32_t num_soa_entries = segment.num_soa_entries;
+			for (uint32_t transform_index = 0; transform_index < num_transforms; ++transform_index)
+			{
+				qvvf_ranges& segment_range = segment.ranges[transform_index];
+				segment_range.is_rotation_constant = false;
+				segment_range.is_rotation_default = false;
+				segment_range.is_translation_constant = false;
+				segment_range.is_translation_default = false;
+				segment_range.is_scale_constant = false;
+				segment_range.is_scale_default = false;
+				segment_range.are_rotations_normalized = false;
+				segment_range.are_translations_normalized = false;
+				segment_range.are_scales_normalized = false;
+
+				{
+					Vector4_32* rotations_x;
+					Vector4_32* rotations_y;
+					Vector4_32* rotations_z;
+					Vector4_32* rotations_w;
+					database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
+
+					extract_vector4f_range(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries, segment_range.rotation_min, segment_range.rotation_max);
+
+					Vector4_32 range_min = vector_unaligned_load(segment_range.rotation_min);
+					Vector4_32 range_max = vector_unaligned_load(segment_range.rotation_max);
+					Vector4_32 range_extent;
+					fixup_range(range_min, range_max, range_extent);
+					vector_unaligned_write(range_min, segment_range.rotation_min);
+					vector_unaligned_write(range_max, segment_range.rotation_max);
+					vector_unaligned_write(range_extent, segment_range.rotation_extent);
+				}
+
+				{
+					Vector4_32* translations_x;
+					Vector4_32* translations_y;
+					Vector4_32* translations_z;
+					database.get_translations(segment, transform_index, translations_x, translations_y, translations_z);
+
+					extract_vector3f_range(translations_x, translations_y, translations_z, num_soa_entries, segment_range.translation_min, segment_range.translation_max);
+
+					Vector4_32 range_min = vector_unaligned_load(segment_range.translation_min);
+					Vector4_32 range_max = vector_unaligned_load(segment_range.translation_max);
+					Vector4_32 range_extent;
+					fixup_range(range_min, range_max, range_extent);
+					vector_unaligned_write(range_min, segment_range.translation_min);
+					vector_unaligned_write(range_max, segment_range.translation_max);
+					vector_unaligned_write(range_extent, segment_range.translation_extent);
+				}
+
+				if (has_scale)
+				{
+					Vector4_32* scales_x;
+					Vector4_32* scales_y;
+					Vector4_32* scales_z;
+					database.get_scales(segment, transform_index, scales_x, scales_y, scales_z);
+
+					extract_vector3f_range(scales_x, scales_y, scales_z, num_soa_entries, segment_range.scale_min, segment_range.scale_max);
+
+					Vector4_32 range_min = vector_unaligned_load(segment_range.scale_min);
+					Vector4_32 range_max = vector_unaligned_load(segment_range.scale_max);
+					Vector4_32 range_extent;
+					fixup_range(range_min, range_max, range_extent);
+					vector_unaligned_write(range_min, segment_range.scale_min);
+					vector_unaligned_write(range_max, segment_range.scale_max);
+					vector_unaligned_write(range_extent, segment_range.scale_extent);
+				}
+				else
+				{
+					vector_unaligned_write3(zero, segment_range.scale_min);
+					vector_unaligned_write3(zero, segment_range.scale_max);
+					vector_unaligned_write3(zero, segment_range.scale_extent);
+				}
+			}
+		}
+
 		inline void merge_database_transform_ranges_from_segments(track_database& database, segment_context* segments, uint32_t num_segments)
 		{
 			const Vector4_32 range_min_value = vector_set(1e10f);
@@ -571,6 +709,15 @@ namespace acl
 				}
 
 				qvvf_ranges& clip_transform_range = database.get_range(transform_index);
+				clip_transform_range.is_rotation_constant = false;
+				clip_transform_range.is_rotation_default = false;
+				clip_transform_range.is_translation_constant = false;
+				clip_transform_range.is_translation_default = false;
+				clip_transform_range.is_scale_constant = false;
+				clip_transform_range.is_scale_default = false;
+				clip_transform_range.are_rotations_normalized = false;
+				clip_transform_range.are_translations_normalized = false;
+				clip_transform_range.are_scales_normalized = false;
 
 				const Vector4_32 rotation_range_extent = vector_sub(rotation_range_max, rotation_range_min);
 				vector_unaligned_write(rotation_range_min, clip_transform_range.rotation_min);
@@ -586,6 +733,202 @@ namespace acl
 				vector_unaligned_write3(scale_range_min, clip_transform_range.scale_min);
 				vector_unaligned_write3(scale_range_max, clip_transform_range.scale_max);
 				vector_unaligned_write3(scale_range_extent, clip_transform_range.scale_extent);
+			}
+		}
+
+		inline void normalize_vector4f_track(Vector4_32* inputs_x, Vector4_32* inputs_y, Vector4_32* inputs_z, Vector4_32* inputs_w, uint32_t num_soa_entries, const float range_min[4], const float range_extent[4])
+		{
+			const Vector4_32 one = vector_set(1.0f);
+			const Vector4_32 zero = vector_zero_32();
+			const Vector4_32 range_extent_epsilon = vector_set(0.000000001f);
+
+			const Vector4_32 range_min_x = vector_broadcast(&range_min[0]);
+			const Vector4_32 range_min_y = vector_broadcast(&range_min[1]);
+			const Vector4_32 range_min_z = vector_broadcast(&range_min[2]);
+			const Vector4_32 range_min_w = vector_broadcast(&range_min[3]);
+
+			const Vector4_32 range_extent_x = vector_broadcast(&range_extent[0]);
+			const Vector4_32 range_extent_y = vector_broadcast(&range_extent[1]);
+			const Vector4_32 range_extent_z = vector_broadcast(&range_extent[2]);
+			const Vector4_32 range_extent_w = vector_broadcast(&range_extent[3]);
+
+			const Vector4_32 is_range_zero_mask_x = vector_less_than(range_extent_x, range_extent_epsilon);
+			const Vector4_32 is_range_zero_mask_y = vector_less_than(range_extent_y, range_extent_epsilon);
+			const Vector4_32 is_range_zero_mask_z = vector_less_than(range_extent_z, range_extent_epsilon);
+			const Vector4_32 is_range_zero_mask_w = vector_less_than(range_extent_w, range_extent_epsilon);
+
+			// TODO: Trivial AVX or ISPC conversion
+			for (uint32_t entry_index = 0; entry_index < num_soa_entries; ++entry_index)
+			{
+				// normalized value is between [0.0 .. 1.0]
+				// value = (normalized value * range extent) + range min
+				// normalized value = (value - range min) / range extent
+				Vector4_32 normalized_input_x = vector_div(vector_sub(inputs_x[entry_index], range_min_x), range_extent_x);
+				Vector4_32 normalized_input_y = vector_div(vector_sub(inputs_y[entry_index], range_min_y), range_extent_y);
+				Vector4_32 normalized_input_z = vector_div(vector_sub(inputs_z[entry_index], range_min_z), range_extent_z);
+				Vector4_32 normalized_input_w = vector_div(vector_sub(inputs_w[entry_index], range_min_w), range_extent_w);
+
+				normalized_input_x = vector_min(normalized_input_x, one);
+				normalized_input_y = vector_min(normalized_input_y, one);
+				normalized_input_z = vector_min(normalized_input_z, one);
+				normalized_input_w = vector_min(normalized_input_w, one);
+
+				normalized_input_x = vector_blend(is_range_zero_mask_x, zero, normalized_input_x);
+				normalized_input_y = vector_blend(is_range_zero_mask_y, zero, normalized_input_y);
+				normalized_input_z = vector_blend(is_range_zero_mask_z, zero, normalized_input_z);
+				normalized_input_w = vector_blend(is_range_zero_mask_w, zero, normalized_input_w);
+
+				ACL_ASSERT(vector_all_greater_equal(normalized_input_x, zero) && vector_all_less_equal(normalized_input_x, one), "Invalid normalized rotation. 0.0 <= [%f, %f, %f, %f] <= 1.0", vector_get_x(normalized_input_x), vector_get_y(normalized_input_x), vector_get_z(normalized_input_x), vector_get_w(normalized_input_x));
+				ACL_ASSERT(vector_all_greater_equal(normalized_input_y, zero) && vector_all_less_equal(normalized_input_y, one), "Invalid normalized rotation. 0.0 <= [%f, %f, %f, %f] <= 1.0", vector_get_x(normalized_input_y), vector_get_y(normalized_input_y), vector_get_z(normalized_input_y), vector_get_w(normalized_input_y));
+				ACL_ASSERT(vector_all_greater_equal(normalized_input_z, zero) && vector_all_less_equal(normalized_input_z, one), "Invalid normalized rotation. 0.0 <= [%f, %f, %f, %f] <= 1.0", vector_get_x(normalized_input_z), vector_get_y(normalized_input_z), vector_get_z(normalized_input_z), vector_get_w(normalized_input_z));
+				ACL_ASSERT(vector_all_greater_equal(normalized_input_w, zero) && vector_all_less_equal(normalized_input_w, one), "Invalid normalized rotation. 0.0 <= [%f, %f, %f, %f] <= 1.0", vector_get_x(normalized_input_w), vector_get_y(normalized_input_w), vector_get_z(normalized_input_w), vector_get_w(normalized_input_w));
+
+				inputs_x[entry_index] = normalized_input_x;
+				inputs_y[entry_index] = normalized_input_y;
+				inputs_z[entry_index] = normalized_input_z;
+				inputs_w[entry_index] = normalized_input_w;
+			}
+		}
+
+		inline void normalize_vector3f_track(Vector4_32* inputs_x, Vector4_32* inputs_y, Vector4_32* inputs_z, uint32_t num_soa_entries, const float range_min[3], const float range_extent[3])
+		{
+			const Vector4_32 one = vector_set(1.0f);
+			const Vector4_32 zero = vector_zero_32();
+			const Vector4_32 range_extent_epsilon = vector_set(0.000000001f);
+
+			const Vector4_32 range_min_x = vector_broadcast(&range_min[0]);
+			const Vector4_32 range_min_y = vector_broadcast(&range_min[1]);
+			const Vector4_32 range_min_z = vector_broadcast(&range_min[2]);
+
+			const Vector4_32 range_extent_x = vector_broadcast(&range_extent[0]);
+			const Vector4_32 range_extent_y = vector_broadcast(&range_extent[1]);
+			const Vector4_32 range_extent_z = vector_broadcast(&range_extent[2]);
+
+			const Vector4_32 is_range_zero_mask_x = vector_less_than(range_extent_x, range_extent_epsilon);
+			const Vector4_32 is_range_zero_mask_y = vector_less_than(range_extent_y, range_extent_epsilon);
+			const Vector4_32 is_range_zero_mask_z = vector_less_than(range_extent_z, range_extent_epsilon);
+
+			// TODO: Trivial AVX or ISPC conversion
+			for (uint32_t entry_index = 0; entry_index < num_soa_entries; ++entry_index)
+			{
+				// normalized value is between [0.0 .. 1.0]
+				// value = (normalized value * range extent) + range min
+				// normalized value = (value - range min) / range extent
+				Vector4_32 normalized_input_x = vector_div(vector_sub(inputs_x[entry_index], range_min_x), range_extent_x);
+				Vector4_32 normalized_input_y = vector_div(vector_sub(inputs_y[entry_index], range_min_y), range_extent_y);
+				Vector4_32 normalized_input_z = vector_div(vector_sub(inputs_z[entry_index], range_min_z), range_extent_z);
+
+				normalized_input_x = vector_min(normalized_input_x, one);
+				normalized_input_y = vector_min(normalized_input_y, one);
+				normalized_input_z = vector_min(normalized_input_z, one);
+
+				normalized_input_x = vector_blend(is_range_zero_mask_x, zero, normalized_input_x);
+				normalized_input_y = vector_blend(is_range_zero_mask_y, zero, normalized_input_y);
+				normalized_input_z = vector_blend(is_range_zero_mask_z, zero, normalized_input_z);
+
+				ACL_ASSERT(vector_all_greater_equal(normalized_input_x, zero) && vector_all_less_equal(normalized_input_x, one), "Invalid normalized rotation. 0.0 <= [%f, %f, %f, %f] <= 1.0", vector_get_x(normalized_input_x), vector_get_y(normalized_input_x), vector_get_z(normalized_input_x), vector_get_w(normalized_input_x));
+				ACL_ASSERT(vector_all_greater_equal(normalized_input_y, zero) && vector_all_less_equal(normalized_input_y, one), "Invalid normalized rotation. 0.0 <= [%f, %f, %f, %f] <= 1.0", vector_get_x(normalized_input_y), vector_get_y(normalized_input_y), vector_get_z(normalized_input_y), vector_get_w(normalized_input_y));
+				ACL_ASSERT(vector_all_greater_equal(normalized_input_z, zero) && vector_all_less_equal(normalized_input_z, one), "Invalid normalized rotation. 0.0 <= [%f, %f, %f, %f] <= 1.0", vector_get_x(normalized_input_z), vector_get_y(normalized_input_z), vector_get_z(normalized_input_z), vector_get_w(normalized_input_z));
+
+				inputs_x[entry_index] = normalized_input_x;
+				inputs_y[entry_index] = normalized_input_y;
+				inputs_z[entry_index] = normalized_input_z;
+			}
+		}
+
+		inline void normalize_with_database_ranges(track_database& database, segment_context& segment, RangeReductionFlags8 range_reduction)
+		{
+			const bool has_scale = database.has_scale();
+			const uint32_t num_transforms = database.get_num_transforms();
+			const uint32_t num_soa_entries = segment.num_soa_entries;
+			for (uint32_t transform_index = 0; transform_index < num_transforms; ++transform_index)
+			{
+				qvvf_ranges& transform_range = database.get_range(transform_index);
+
+				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Rotations))
+				{
+					Vector4_32* rotations_x;
+					Vector4_32* rotations_y;
+					Vector4_32* rotations_z;
+					Vector4_32* rotations_w;
+					database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
+
+					normalize_vector4f_track(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries, transform_range.rotation_min, transform_range.rotation_extent);
+
+					transform_range.are_rotations_normalized = true;
+				}
+
+				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Translations))
+				{
+					Vector4_32* translations_x;
+					Vector4_32* translations_y;
+					Vector4_32* translations_z;
+					database.get_translations(segment, transform_index, translations_x, translations_y, translations_z);
+
+					normalize_vector3f_track(translations_x, translations_y, translations_z, num_soa_entries, transform_range.translation_min, transform_range.translation_extent);
+
+					transform_range.are_translations_normalized = true;
+				}
+
+				if (has_scale && are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Scales))
+				{
+					Vector4_32* scales_x;
+					Vector4_32* scales_y;
+					Vector4_32* scales_z;
+					database.get_scales(segment, transform_index, scales_x, scales_y, scales_z);
+
+					normalize_vector3f_track(scales_x, scales_y, scales_z, num_soa_entries, transform_range.scale_min, transform_range.scale_extent);
+
+					transform_range.are_scales_normalized = true;
+				}
+			}
+		}
+
+		inline void normalize_with_segment_ranges(track_database& database, segment_context& segment, RangeReductionFlags8 range_reduction)
+		{
+			const bool has_scale = database.has_scale();
+			const uint32_t num_transforms = database.get_num_transforms();
+			const uint32_t num_soa_entries = segment.num_soa_entries;
+			for (uint32_t transform_index = 0; transform_index < num_transforms; ++transform_index)
+			{
+				qvvf_ranges& segment_range = segment.ranges[transform_index];
+
+				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Rotations))
+				{
+					Vector4_32* rotations_x;
+					Vector4_32* rotations_y;
+					Vector4_32* rotations_z;
+					Vector4_32* rotations_w;
+					database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
+
+					normalize_vector4f_track(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries, segment_range.rotation_min, segment_range.rotation_extent);
+
+					segment_range.are_rotations_normalized = true;
+				}
+
+				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Translations))
+				{
+					Vector4_32* translations_x;
+					Vector4_32* translations_y;
+					Vector4_32* translations_z;
+					database.get_translations(segment, transform_index, translations_x, translations_y, translations_z);
+
+					normalize_vector3f_track(translations_x, translations_y, translations_z, num_soa_entries, segment_range.translation_min, segment_range.translation_extent);
+
+					segment_range.are_translations_normalized = true;
+				}
+
+				if (has_scale && are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Scales))
+				{
+					Vector4_32* scales_x;
+					Vector4_32* scales_y;
+					Vector4_32* scales_z;
+					database.get_scales(segment, transform_index, scales_x, scales_y, scales_z);
+
+					normalize_vector3f_track(scales_x, scales_y, scales_z, num_soa_entries, segment_range.scale_min, segment_range.scale_extent);
+
+					segment_range.are_scales_normalized = true;
+				}
 			}
 		}
 	}

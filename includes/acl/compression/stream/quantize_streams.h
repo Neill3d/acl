@@ -33,6 +33,7 @@
 #include "acl/math/vector4_32.h"
 #include "acl/math/vector4_packing.h"
 #include "acl/compression/impl/track_bit_rate_database.h"
+#include "acl/compression/impl/track_database.h"
 #include "acl/compression/stream/clip_context.h"
 #include "acl/compression/stream/sample_streams.h"
 #include "acl/compression/stream/normalize_streams.h"
@@ -1300,6 +1301,108 @@ namespace acl
 
 			// Quantize our streams now that we found the optimal bit rates
 			impl::quantize_all_streams(context);
+		}
+	}
+
+	namespace acl_impl
+	{
+		struct quantization_context
+		{
+			IAllocator& allocator;
+
+			track_database& mutable_tracks_database;
+			track_database& raw_tracks_database;			// todo const
+			track_database* additive_base_tracks_database;	// todo const
+
+			segment_context* segment;
+
+			const RigidSkeleton& skeleton;
+			const CompressionSettings& settings;
+
+			//track_bit_rate_database database;
+			single_track_query local_query;
+			hierarchical_track_query object_query;
+
+			uint32_t num_transforms;
+
+			uint32_t num_samples;
+			uint32_t segment_sample_start_index;
+			float sample_rate;
+			float clip_duration;
+			float segment_duration;
+			bool has_scale;
+			bool has_additive_base;
+
+			Transform_32* additive_local_pose;
+			Transform_32* raw_local_pose;
+			Transform_32* lossy_local_pose;
+
+			BoneBitRate* bit_rate_per_bone;
+
+			quantization_context(IAllocator& allocator_, track_database& mutable_tracks_database_, track_database& raw_tracks_database_, track_database* additive_base_tracks_database_, const CompressionSettings& settings_, const RigidSkeleton& skeleton_)
+				: allocator(allocator_)
+				, mutable_tracks_database(mutable_tracks_database_)
+				, raw_tracks_database(raw_tracks_database_)
+				, additive_base_tracks_database(additive_base_tracks_database_)
+				, segment(nullptr)
+				, skeleton(skeleton_)
+				, settings(settings_)
+				//, database(allocator_, settings_, clip_.segments->bone_streams, raw_clip_.segments->bone_streams, clip_.num_bones, clip_.segments->num_samples)
+				, local_query()
+				, object_query(allocator_)
+				, num_samples(~0u)
+				, segment_sample_start_index(~0u)
+				//, sample_rate(clip_.sample_rate)
+				//, clip_duration(clip_.duration)
+				, segment_duration(0.0f)
+				//, has_scale(clip_.has_scale)
+				//, has_additive_base(clip_.has_additive_base)
+			{
+				//local_query.bind(database);
+				//object_query.bind(database);
+
+				const uint32_t num_transforms_ = mutable_tracks_database_.get_num_transforms();
+				num_transforms = num_transforms_;
+
+				//additive_local_pose = clip_.has_additive_base ? allocate_type_array<Transform_32>(allocator, num_transforms_) : nullptr;
+				raw_local_pose = allocate_type_array<Transform_32>(allocator, num_transforms_);
+				lossy_local_pose = allocate_type_array<Transform_32>(allocator, num_transforms_);
+				bit_rate_per_bone = allocate_type_array<BoneBitRate>(allocator, num_transforms_);
+			}
+
+			~quantization_context()
+			{
+				deallocate_type_array(allocator, additive_local_pose, num_transforms);
+				deallocate_type_array(allocator, raw_local_pose, num_transforms);
+				deallocate_type_array(allocator, lossy_local_pose, num_transforms);
+				deallocate_type_array(allocator, bit_rate_per_bone, num_transforms);
+			}
+
+			void set_segment(segment_context& segment_)
+			{
+				segment = &segment_;
+				//segment_sample_start_index = segment_.clip_sample_offset;
+				//segment_duration = calculate_duration(num_samples, sample_rate);
+				//database.set_segment(segment_.bone_streams, segment_.num_bones, segment_.num_samples);
+			}
+
+			bool is_valid() const { return segment != nullptr; }
+		};
+
+		inline void quantize_tracks(quantization_context& context, segment_context& segment, const CompressionSettings& settings)
+		{
+			context.set_segment(segment);
+
+			const bool is_rotation_variable = is_rotation_format_variable(settings.rotation_format);
+			const bool is_translation_variable = is_vector_format_variable(settings.translation_format);
+			const bool is_scale_variable = is_vector_format_variable(settings.scale_format);
+			const bool is_any_variable = is_rotation_variable || is_translation_variable || is_scale_variable;
+
+			//if (is_any_variable)
+			//	impl::find_optimal_bit_rates(context);
+
+			// Quantize our streams now that we found the optimal bit rates
+			//impl::quantize_all_streams(context);
 		}
 	}
 }

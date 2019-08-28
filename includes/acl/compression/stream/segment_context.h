@@ -93,6 +93,7 @@ namespace acl
 
 		struct qvvf_ranges
 		{
+			// TODO: Convert those to Vector4_32, pointless like this, it generates too many load instructions, shuffles are better
 			float rotation_min[4];
 			float rotation_max[4];
 			float rotation_extent[4];
@@ -113,6 +114,14 @@ namespace acl
 
 			bool is_scale_constant;
 			bool is_scale_default;
+
+			bool are_rotations_normalized;
+			bool are_translations_normalized;
+			bool are_scales_normalized;
+
+			bool is_rotation_animated() const { return !is_rotation_constant && !is_rotation_default; }
+			bool is_translation_animated() const { return !is_translation_constant && !is_translation_default; }
+			bool is_scale_animated() const { return !is_scale_constant && !is_scale_default; }
 		};
 
 		struct segment_context

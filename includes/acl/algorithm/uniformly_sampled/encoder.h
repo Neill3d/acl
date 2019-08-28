@@ -120,6 +120,10 @@ namespace acl
 			track_database raw_track_database(allocator, clip, skeleton, settings, segments, num_segments);
 			track_database mutable_track_database(allocator, clip, skeleton, settings, segments, num_segments);	// TODO: direct memcpy from raw
 
+			track_database* additive_base_track_database = nullptr;
+			if (additive_base_clip != nullptr)
+				additive_base_track_database = allocate_type<track_database>(allocator, allocator, *additive_base_clip, skeleton, settings, segments, num_segments);
+
 			// Process every segment, this could be done in parallel
 			for (uint32_t segment_index = 0; segment_index < num_segments; ++segment_index)
 			{
@@ -138,20 +142,21 @@ namespace acl
 			detect_constant_tracks(mutable_track_database, segments, num_segments, settings.constant_rotation_threshold_angle, settings.constant_translation_threshold, settings.constant_scale_threshold);
 
 			// Process every segment, this could be done in parallel
+			quantization_context quant_context(allocator, mutable_track_database, raw_track_database, additive_base_track_database, settings, skeleton);
 			for (uint32_t segment_index = 0; segment_index < num_segments; ++segment_index)
 			{
-#if 0
+				segment_context& segment = segments[segment_index];
+
 				if (settings.range_reduction != RangeReductionFlags8::None)
-					normalize_clip_streams(clip_context, settings.range_reduction);
+					normalize_with_database_ranges(mutable_track_database, segment, settings.range_reduction);
 
 				if (settings.segmenting.enabled && settings.segmenting.range_reduction != RangeReductionFlags8::None)
 				{
-					extract_segment_bone_ranges(allocator, clip_context);
-					normalize_segment_streams(clip_context, settings.range_reduction);
+					extract_segment_ranges(mutable_track_database, segment);
+					normalize_with_segment_ranges(mutable_track_database, segment, settings.segmenting.range_reduction);
 				}
 
-				quantize_streams(allocator, clip_context, settings, skeleton, raw_clip_context, additive_base_clip_context);
-#endif
+				quantize_tracks(quant_context, segment, settings);
 			}
 
 			convert_rotation_streams(allocator, clip_context, settings.rotation_format);
@@ -176,7 +181,7 @@ namespace acl
 				if (settings.segmenting.range_reduction != RangeReductionFlags8::None)
 				{
 					extract_segment_bone_ranges(allocator, clip_context);
-					normalize_segment_streams(clip_context, settings.range_reduction);
+					normalize_segment_streams(clip_context, settings.segmenting.range_reduction);
 				}
 			}
 			else
@@ -313,6 +318,7 @@ namespace acl
 
 			deallocate_type_array(allocator, output_bone_mapping, num_output_bones);
 			destroy_segments(allocator, segments, num_segments);
+			deallocate_type(allocator, additive_base_track_database);
 			destroy_clip_context(allocator, clip_context);
 			destroy_clip_context(allocator, raw_clip_context);
 

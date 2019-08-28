@@ -202,7 +202,7 @@ namespace acl
 				segment.start_offset = 0;
 				segment.num_samples_per_track = num_samples_per_track;
 
-				const uint32_t num_simd_samples_per_track = align_to(num_samples_per_track, k_simd_width);
+				const uint32_t num_simd_samples_per_track = align_to(num_samples_per_track, k_simd_padding_width);
 				const uint32_t component_size = sizeof(float) * num_simd_samples_per_track;
 				const uint32_t transform_size = component_size * num_components_per_transform;
 				const uint32_t segment_size = transform_size * num_transforms;
@@ -287,7 +287,7 @@ namespace acl
 				segment.start_offset = start_offset;
 				segment.num_samples_per_track = num_samples_in_segment;
 
-				const uint32_t num_simd_samples_per_track = align_to(num_samples_in_segment, k_simd_width);
+				const uint32_t num_simd_samples_per_track = align_to(num_samples_in_segment, k_simd_padding_width);
 				const uint32_t component_size = sizeof(float) * num_simd_samples_per_track;
 				const uint32_t transform_size = component_size * num_components_per_transform;
 				const uint32_t segment_size = align_to(transform_size * num_transforms, 64);	// Align to cache line to avoid false sharing with next segment
