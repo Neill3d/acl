@@ -142,7 +142,7 @@ namespace acl
 			detect_constant_tracks(mutable_track_database, segments, num_segments, settings.constant_rotation_threshold_angle, settings.constant_translation_threshold, settings.constant_scale_threshold);
 
 			// Process every segment, this could be done in parallel
-			quantization_context quant_context(allocator, mutable_track_database, raw_track_database, additive_base_track_database, settings, skeleton);
+			acl::impl::quantization_context quant_context(allocator, mutable_track_database, raw_track_database, additive_base_track_database, settings, skeleton);
 			for (uint32_t segment_index = 0; segment_index < num_segments; ++segment_index)
 			{
 				segment_context& segment = segments[segment_index];

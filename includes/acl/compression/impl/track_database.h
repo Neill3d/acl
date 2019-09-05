@@ -81,29 +81,49 @@ namespace acl
 			inline uint32_t get_num_samples_per_track() const { return m_num_samples_per_track; }
 			inline bool has_scale() const { return m_has_scale; }
 			inline Vector4_32 ACL_SIMD_CALL get_default_scale() const { return m_default_scale; }
+			inline float get_sample_rate() const { return m_sample_rate; }
+			inline float get_duration() const { return m_duration; }
+
+			inline RotationFormat8 get_rotation_format() const { return m_rotation_format; }
+			inline void set_rotation_format(RotationFormat8 format) { m_rotation_format = format; }
+			inline VectorFormat8 get_translation_format() const { return m_translation_format; }
+			inline VectorFormat8 get_scale_format() const { return m_scale_format; }
 
 			inline qvvf_ranges& get_range(uint32_t transform_index) { return m_ranges[transform_index]; }
+			inline const qvvf_ranges& get_range(uint32_t transform_index) const { return m_ranges[transform_index]; }
+
+			inline uint32_t get_parent_index(uint32_t transform_index) const { return m_skeleton.get_bones()[transform_index].parent_index; }
+			//inline BoneBitRate& get_bit_rate(uint32_t transform_index) { return m_bit_rates[transform_index]; }
 
 			inline void get_rotations(const segment_context& segment, uint32_t transform_index, Vector4_32*& out_rotations_x, Vector4_32*& out_rotations_y, Vector4_32*& out_rotations_z, Vector4_32*& out_rotations_w);
 			inline void get_translations(const segment_context& segment, uint32_t transform_index, Vector4_32*& out_translations_x, Vector4_32*& out_translations_y, Vector4_32*& out_translations_z);
 			inline void get_scales(const segment_context& segment, uint32_t transform_index, Vector4_32*& out_scales_x, Vector4_32*& out_scales_y, Vector4_32*& out_scales_z);
 
-			inline Vector4_32 ACL_SIMD_CALL get_rotation(const segment_context& segment, uint32_t transform_index, uint32_t sample_index);
-			inline Vector4_32 ACL_SIMD_CALL get_translation(const segment_context& segment, uint32_t transform_index, uint32_t sample_index);
-			inline Vector4_32 ACL_SIMD_CALL get_scale(const segment_context& segment, uint32_t transform_index, uint32_t sample_index);
+			inline Vector4_32 ACL_SIMD_CALL get_rotation(const segment_context& segment, uint32_t transform_index, uint32_t sample_index) const;
+			inline Vector4_32 ACL_SIMD_CALL get_translation(const segment_context& segment, uint32_t transform_index, uint32_t sample_index) const;
+			inline Vector4_32 ACL_SIMD_CALL get_scale(const segment_context& segment, uint32_t transform_index, uint32_t sample_index) const;
 
 		private:
 			Vector4_32			m_default_scale;
 
-			IAllocator&			m_allocator;
+			IAllocator&				m_allocator;
+			const RigidSkeleton&	m_skeleton;
 
 			uint32_t			m_num_transforms;
 			uint32_t			m_num_tracks;
 			uint32_t			m_num_samples_per_track;
 
+			float				m_sample_rate;
+			float				m_duration;
+
+			RotationFormat8		m_rotation_format;
+			VectorFormat8		m_translation_format;
+			VectorFormat8		m_scale_format;
+
 			bool				m_has_scale;
 
 			qvvf_ranges*		m_ranges;
+			//BoneBitRate*		m_bit_rates;	// todo
 
 			uint8_t*			m_data;
 			size_t				m_data_size;
@@ -114,6 +134,12 @@ namespace acl
 
 		inline track_database::track_database(IAllocator& allocator, const AnimationClip& clip, const RigidSkeleton& skeleton, const CompressionSettings& settings, const segment_context* segments, uint32_t num_segments)
 			: m_allocator(allocator)
+			, m_skeleton(skeleton)
+			, m_sample_rate(clip.get_sample_rate())
+			, m_duration(clip.get_duration())
+			, m_rotation_format(RotationFormat8::Quat_128)
+			, m_translation_format(VectorFormat8::Vector3_96)
+			, m_scale_format(VectorFormat8::Vector3_96)
 		{
 			(void)skeleton;	// todo
 
@@ -322,7 +348,7 @@ namespace acl
 			out_scales_z = safe_ptr_cast<Vector4_32>(scale_data + offset_z);
 		}
 
-		inline Vector4_32 ACL_SIMD_CALL track_database::get_rotation(const segment_context& segment, uint32_t transform_index, uint32_t sample_index)
+		inline Vector4_32 ACL_SIMD_CALL track_database::get_rotation(const segment_context& segment, uint32_t transform_index, uint32_t sample_index) const
 		{
 			const uint32_t num_components_per_transform = get_num_components_per_transform(m_has_scale);
 			const uint32_t num_simd_samples_per_track = segment.num_simd_samples_per_track;
@@ -348,7 +374,7 @@ namespace acl
 			return vector_set(rotations_x[sample_index], rotations_y[sample_index], rotations_z[sample_index], rotations_w[sample_index]);
 		}
 
-		inline Vector4_32 ACL_SIMD_CALL track_database::get_translation(const segment_context& segment, uint32_t transform_index, uint32_t sample_index)
+		inline Vector4_32 ACL_SIMD_CALL track_database::get_translation(const segment_context& segment, uint32_t transform_index, uint32_t sample_index) const
 		{
 			const uint32_t num_components_per_transform = get_num_components_per_transform(m_has_scale);
 			const uint32_t num_simd_samples_per_track = segment.num_simd_samples_per_track;
@@ -375,7 +401,7 @@ namespace acl
 			return vector_set(translations_x[sample_index], translations_y[sample_index], translations_z[sample_index], 0.0f);
 		}
 
-		inline Vector4_32 ACL_SIMD_CALL track_database::get_scale(const segment_context& segment, uint32_t transform_index, uint32_t sample_index)
+		inline Vector4_32 ACL_SIMD_CALL track_database::get_scale(const segment_context& segment, uint32_t transform_index, uint32_t sample_index) const
 		{
 			if (!m_has_scale)
 				return m_default_scale;

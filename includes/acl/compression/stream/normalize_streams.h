@@ -164,16 +164,22 @@ namespace acl
 		}
 	}
 
+	namespace acl_impl
+	{
+		inline Vector4_32 ACL_SIMD_CALL normalize_sample(Vector4_32Arg0 sample, Vector4_32Arg1 range_min, Vector4_32Arg2 range_extent)
+		{
+			const Vector4_32 is_range_zero_mask = vector_less_than(range_extent, vector_set(0.000000001f));
+
+			Vector4_32 normalized_sample = vector_div(vector_sub(sample, range_min), range_extent);
+			// Clamp because the division might be imprecise
+			normalized_sample = vector_min(normalized_sample, vector_set(1.0f));
+			return vector_blend(is_range_zero_mask, vector_zero_32(), normalized_sample);
+		}
+	}
+
 	inline Vector4_32 ACL_SIMD_CALL normalize_sample(Vector4_32Arg0 sample, const TrackStreamRange& range)
 	{
-		const Vector4_32 range_min = range.get_min();
-		const Vector4_32 range_extent = range.get_extent();
-		const Vector4_32 is_range_zero_mask = vector_less_than(range_extent, vector_set(0.000000001f));
-
-		Vector4_32 normalized_sample = vector_div(vector_sub(sample, range_min), range_extent);
-		// Clamp because the division might be imprecise
-		normalized_sample = vector_min(normalized_sample, vector_set(1.0f));
-		return vector_blend(is_range_zero_mask, vector_zero_32(), normalized_sample);
+		return acl_impl::normalize_sample(sample, range.get_min(), range.get_extent());
 	}
 
 	inline void normalize_rotation_streams(BoneStreams* bone_streams, const BoneRanges* bone_ranges, uint16_t num_bones)

@@ -26,7 +26,9 @@
 
 #include "acl/core/compiler_utils.h"
 #include "acl/core/iallocator.h"
+#include "acl/compression/impl/track_database.h"
 #include "acl/compression/stream/sample_streams.h"
+#include "acl/compression/stream/segment_context.h"
 #include "acl/compression/stream/track_stream.h"
 
 #include <cstdint>
@@ -61,6 +63,7 @@ namespace acl
 
 			inline void bind(track_bit_rate_database& database);
 			inline void build(uint32_t track_index, const BoneBitRate* bit_rates, const BoneStreams* bone_streams);
+			inline void build(uint32_t track_index, const BoneBitRate* bit_rates, const track_database& database);
 
 		private:
 			hierarchical_track_query(const hierarchical_track_query&) = delete;
@@ -73,12 +76,12 @@ namespace acl
 				uint32_t	scale_cache_index;
 			};
 
-			IAllocator&			m_allocator;
+			IAllocator&						m_allocator;
 			track_bit_rate_database*		m_database;
-			uint32_t			m_track_index;
-			const BoneBitRate*	m_bit_rates;
-			transform_indices*	m_indices;
-			uint32_t			m_num_transforms;
+			uint32_t						m_track_index;
+			const BoneBitRate*				m_bit_rates;
+			transform_indices*				m_indices;
+			uint32_t						m_num_transforms;
 
 			friend track_bit_rate_database;
 		};
@@ -153,9 +156,11 @@ namespace acl
 		{
 		public:
 			inline track_bit_rate_database(IAllocator& allocator, const CompressionSettings& settings, const BoneStreams* bone_streams, const BoneStreams* raw_bone_steams, uint32_t num_transforms, uint32_t num_samples_per_track);
+			inline track_bit_rate_database(IAllocator& allocator, const CompressionSettings& settings, const track_database& mutable_track_database, const track_database& raw_track_database);
 			inline ~track_bit_rate_database();
 
 			inline void set_segment(const BoneStreams* bone_streams, uint32_t num_transforms, uint32_t num_samples_per_track);
+			inline void set_segment(const segment_context& segment);
 
 			inline void sample(const single_track_query& query, float sample_time, Transform_32* out_transforms, uint32_t num_transforms);
 			inline void sample(const hierarchical_track_query& query, float sample_time, Transform_32* out_transforms, uint32_t num_transforms);
@@ -169,13 +174,22 @@ namespace acl
 			inline void find_cache_entries(uint32_t track_index, const BoneBitRate& bit_rates, uint32_t& out_rotation_cache_index, uint32_t& out_translation_cache_index, uint32_t& out_scale_cache_index);
 
 			template<SampleDistribution8 distribution>
-			ACL_FORCE_INLINE Quat_32 ACL_SIMD_CALL sample_rotation(const sample_context& context, uint32_t rotation_cache_index);
+			ACL_FORCE_INLINE Quat_32 ACL_SIMD_CALL sample_stream_rotation(const sample_context& context, uint32_t rotation_cache_index);
 
 			template<SampleDistribution8 distribution>
-			ACL_FORCE_INLINE Vector4_32 ACL_SIMD_CALL sample_translation(const sample_context& context, uint32_t translation_cache_index);
+			ACL_FORCE_INLINE Quat_32 ACL_SIMD_CALL sample_database_rotation(const sample_context& context, uint32_t rotation_cache_index);
 
 			template<SampleDistribution8 distribution>
-			ACL_FORCE_INLINE Vector4_32 ACL_SIMD_CALL sample_scale(const sample_context& context, uint32_t scale_cache_index);
+			ACL_FORCE_INLINE Vector4_32 ACL_SIMD_CALL sample_stream_translation(const sample_context& context, uint32_t translation_cache_index);
+
+			template<SampleDistribution8 distribution>
+			ACL_FORCE_INLINE Vector4_32 ACL_SIMD_CALL sample_database_translation(const sample_context& context, uint32_t translation_cache_index);
+
+			template<SampleDistribution8 distribution>
+			ACL_FORCE_INLINE Vector4_32 ACL_SIMD_CALL sample_stream_scale(const sample_context& context, uint32_t scale_cache_index);
+
+			template<SampleDistribution8 distribution>
+			ACL_FORCE_INLINE Vector4_32 ACL_SIMD_CALL sample_database_scale(const sample_context& context, uint32_t scale_cache_index);
 
 			struct transform_cache_entry
 			{
@@ -206,24 +220,35 @@ namespace acl
 
 			Vector4_32			m_default_scale;
 
-			IAllocator&			m_allocator;
-			const BoneStreams*	m_mutable_bone_streams;
-			const BoneStreams*	m_raw_bone_streams;
+			IAllocator&				m_allocator;
+			const BoneStreams*		m_mutable_bone_streams;
+			const BoneStreams*		m_raw_bone_streams;
+			const track_database*	m_mutable_track_database;
+			const track_database*	m_raw_track_database;
+			const segment_context*	m_segment;
 
 			uint32_t			m_num_transforms;
 			uint32_t			m_num_samples_per_track;
 			uint32_t			m_num_entries_per_transform;
 			uint32_t			m_track_size;
+			uint32_t			m_num_cached_tracks;
+
+			uint32_t			m_num_samples_per_track_in_clip;
+			uint32_t			m_num_samples_per_track_in_segment;
+			uint32_t			m_segment_sample_start_offset;
+			float				m_sample_rate;
 
 			BitSetDescription	m_bitset_desc;
 			BitSetIndexRef		m_bitref_constant;
 			RotationFormat8		m_rotation_format;
 			VectorFormat8		m_translation_format;
 			VectorFormat8		m_scale_format;
+			SampleDistribution8	m_distribution;
 			bool				m_is_rotation_variable;
 			bool				m_is_translation_variable;
 			bool				m_is_scale_variable;
 			bool				m_has_scale;
+			bool				m_use_bone_streams;
 
 			uint32_t			m_generation_id;
 
@@ -234,7 +259,6 @@ namespace acl
 
 			uint8_t*			m_data;
 			size_t				m_data_size;
-			size_t				m_num_cached_tracks;
 
 			static constexpr uint32_t k_num_bit_rates_cached_per_track = 4;
 
@@ -275,6 +299,26 @@ namespace acl
 			}
 		}
 
+		inline void hierarchical_track_query::build(uint32_t track_index, const BoneBitRate* bit_rates, const track_database& database)
+		{
+			ACL_ASSERT(m_database != nullptr, "Query not bound to a database");
+			ACL_ASSERT(track_index < m_num_transforms, "Invalid track index");
+
+			m_track_index = track_index;
+			m_bit_rates = bit_rates;
+
+			uint32_t current_track_index = track_index;
+			while (current_track_index != k_invalid_bone_index)
+			{
+				const BoneBitRate& current_bit_rates = bit_rates[current_track_index];
+				transform_indices& indices = m_indices[current_track_index];
+
+				m_database->find_cache_entries(current_track_index, current_bit_rates, indices.rotation_cache_index, indices.translation_cache_index, indices.scale_cache_index);
+
+				current_track_index = database.get_parent_index(current_track_index);
+			}
+		}
+
 		inline void single_track_query::bind(track_bit_rate_database& database)
 		{
 			ACL_ASSERT(m_database == nullptr, "Query already bound");
@@ -306,8 +350,16 @@ namespace acl
 			: m_allocator(allocator)
 			, m_mutable_bone_streams(bone_streams)
 			, m_raw_bone_streams(raw_bone_steams)
+			, m_mutable_track_database(nullptr)
+			, m_raw_track_database(nullptr)
+			, m_segment(nullptr)
 			, m_num_transforms(num_transforms)
 			, m_num_samples_per_track(num_samples_per_track)
+			, m_num_samples_per_track_in_clip(raw_bone_steams->segment->clip->num_samples)
+			, m_num_samples_per_track_in_segment(0)
+			, m_segment_sample_start_offset(0)
+			, m_sample_rate(bone_streams->segment->clip->sample_rate)
+			, m_use_bone_streams(true)
 		{
 			m_transforms = allocate_type_array<transform_cache_entry>(allocator, num_transforms);
 
@@ -348,6 +400,49 @@ namespace acl
 			m_num_cached_tracks = num_cached_tracks;
 		}
 
+		inline track_bit_rate_database::track_bit_rate_database(IAllocator& allocator, const CompressionSettings& settings, const track_database& mutable_track_database, const track_database& raw_track_database)
+			: m_allocator(allocator)
+			, m_mutable_bone_streams(nullptr)
+			, m_raw_bone_streams(nullptr)
+			, m_mutable_track_database(&mutable_track_database)
+			, m_raw_track_database(&raw_track_database)
+			, m_segment(nullptr)
+			, m_num_samples_per_track_in_clip(raw_track_database.get_num_samples_per_track())
+			, m_num_samples_per_track_in_segment(0)
+			, m_segment_sample_start_offset(0)
+			, m_sample_rate(raw_track_database.get_sample_rate())
+			, m_use_bone_streams(false)
+			, m_track_size(0)
+			, m_track_entry_bitsets(nullptr)
+			, m_track_bitsets_size(0)
+			, m_data(nullptr)
+			, m_data_size(0)
+		{
+			const uint32_t num_transforms = raw_track_database.get_num_transforms();
+			m_num_transforms = num_transforms;
+
+			m_transforms = allocate_type_array<transform_cache_entry>(allocator, num_transforms);
+
+			const bool has_scale = mutable_track_database.has_scale();
+			m_has_scale = has_scale;
+			m_default_scale = raw_track_database.get_default_scale();
+
+			const uint32_t num_tracks_per_transform = has_scale ? 3 : 2;
+			const uint32_t num_entries_per_transform = num_tracks_per_transform * k_num_bit_rates_cached_per_track;
+			m_num_entries_per_transform = num_entries_per_transform;
+
+			m_num_cached_tracks = num_transforms * m_num_entries_per_transform;
+
+			m_rotation_format = settings.rotation_format;
+			m_translation_format = settings.translation_format;
+			m_scale_format = settings.scale_format;
+			m_is_rotation_variable = is_rotation_format_variable(settings.rotation_format);
+			m_is_translation_variable = is_vector_format_variable(settings.translation_format);
+			m_is_scale_variable = is_vector_format_variable(settings.scale_format);
+
+			m_generation_id = 1;
+		}
+
 		inline track_bit_rate_database::~track_bit_rate_database()
 		{
 			deallocate_type_array(m_allocator, m_transforms, m_num_transforms);
@@ -357,6 +452,7 @@ namespace acl
 
 		inline void track_bit_rate_database::set_segment(const BoneStreams* bone_streams, uint32_t num_transforms, uint32_t num_samples_per_track)
 		{
+			ACL_ASSERT(m_use_bone_streams, "Cannot call this function if bone streams aren't used");
 			ACL_ASSERT(bone_streams != nullptr, "Bone streams cannot be null");
 			ACL_ASSERT(num_transforms == m_num_transforms, "The number of transforms isn't consistent, we will corrupt the heap");
 			ACL_ASSERT(num_samples_per_track <= m_num_samples_per_track, "Not enough memory has been reserved, we will corrupt the heap");
@@ -365,6 +461,50 @@ namespace acl
 			(void)m_num_samples_per_track;
 
 			m_mutable_bone_streams = bone_streams;
+			m_distribution = bone_streams->segment->distribution;
+			m_num_samples_per_track_in_segment = num_samples_per_track;
+			m_segment_sample_start_offset = bone_streams->segment->clip_sample_offset;
+
+			// Reset our cache
+			for (uint32_t transform_index = 0; transform_index < m_num_transforms; ++transform_index)
+				m_transforms[transform_index] = transform_cache_entry();
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+			printf("Switching segment, resetting the database...\n");
+#endif
+		}
+
+		inline void track_bit_rate_database::set_segment(const segment_context& segment)
+		{
+			ACL_ASSERT(!m_use_bone_streams, "Cannot call this function if bone streams are used");
+
+			if (m_data == nullptr)
+			{
+				// First segment, initialize everything else
+				const uint32_t num_samples_per_track = segment.num_samples_per_track;
+				m_num_samples_per_track = num_samples_per_track;
+
+				m_bitset_desc = BitSetDescription::make_from_num_bits(num_samples_per_track);
+				m_bitref_constant = BitSetIndexRef(m_bitset_desc, 0);
+
+				const uint32_t track_bitsets_size = m_bitset_desc.get_size() * m_num_cached_tracks;
+				m_track_entry_bitsets = allocate_type_array<uint32_t>(m_allocator, track_bitsets_size);
+				m_track_bitsets_size = track_bitsets_size;
+
+				// We allocate a single float buffer to accommodate 4 bit rates for every rot/trans/scale of each transform track.
+				// Each sub-track is padded and aligned to ensure that it starts on a cache line boundary.
+				const uint32_t track_size = align_to<uint32_t>(sizeof(Vector4_32) * num_samples_per_track, 64);
+				m_track_size = track_size;
+
+				const uint32_t data_size = track_size * m_num_cached_tracks;
+				m_data = reinterpret_cast<uint8_t*>(m_allocator.allocate(data_size, 64));
+				m_data_size = data_size;
+			}
+
+			m_distribution = segment.distribution;
+			m_num_samples_per_track_in_segment = segment.num_samples_per_track;
+			m_segment_sample_start_offset = segment.start_offset;
+			m_segment = &segment;
 
 			// Reset our cache
 			for (uint32_t transform_index = 0; transform_index < m_num_transforms; ++transform_index)
@@ -563,7 +703,7 @@ namespace acl
 		}
 
 		template<SampleDistribution8 distribution>
-		ACL_FORCE_INLINE Quat_32 ACL_SIMD_CALL track_bit_rate_database::sample_rotation(const sample_context& context, uint32_t rotation_cache_index)
+		ACL_FORCE_INLINE Quat_32 ACL_SIMD_CALL track_bit_rate_database::sample_stream_rotation(const sample_context& context, uint32_t rotation_cache_index)
 		{
 			const uint32_t track_index = context.track_index;
 			const BoneStreams& bone_stream = m_mutable_bone_streams[track_index];
@@ -593,9 +733,7 @@ namespace acl
 					else
 						rotation = get_rotation_sample(bone_stream, 0, m_rotation_format);
 
-					// If we are uniform, normalize now. Variable will interpolate and normalize after.
-					if (static_condition<distribution == SampleDistribution8::Uniform>::test())
-						rotation = quat_normalize(rotation);
+					rotation = quat_normalize(rotation);
 
 					cached_samples[0] = rotation;
 					bitset_set(validity_bitset, m_bitref_constant, true);
@@ -702,7 +840,136 @@ namespace acl
 		}
 
 		template<SampleDistribution8 distribution>
-		ACL_FORCE_INLINE Vector4_32 ACL_SIMD_CALL track_bit_rate_database::sample_translation(const sample_context& context, uint32_t translation_cache_index)
+		ACL_FORCE_INLINE Quat_32 ACL_SIMD_CALL track_bit_rate_database::sample_database_rotation(const sample_context& context, uint32_t rotation_cache_index)
+		{
+			const qvvf_ranges& transform_range = m_mutable_track_database->get_range(context.track_index);
+
+			Quat_32 rotation;
+			if (transform_range.is_rotation_default)
+				rotation = quat_identity_32();
+			else if (transform_range.is_rotation_constant)
+			{
+				uint32_t* validity_bitset = m_track_entry_bitsets + (m_bitset_desc.get_size() * rotation_cache_index);
+				Quat_32* cached_samples = safe_ptr_cast<Quat_32>(m_data + (m_track_size * rotation_cache_index));
+
+				if (bitset_test(validity_bitset, m_bitref_constant))
+				{
+					// Cached
+					rotation = cached_samples[0];
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+					printf("Hit cache for constant sample for rotation track %u...\n", track_index);
+#endif
+				}
+				else
+				{
+					// Not cached
+					if (m_is_rotation_variable)
+						rotation = get_rotation_sample(*m_raw_track_database, *m_segment, context.track_index, 0);
+					else
+						rotation = get_decayed_rotation_sample(*m_raw_track_database, *m_segment, context.track_index, 0, m_rotation_format);
+
+					rotation = quat_normalize(rotation);
+
+					cached_samples[0] = rotation;
+					bitset_set(validity_bitset, m_bitref_constant, true);
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+					printf("Cached constant sample for rotation track %u (%.5f, %.5f, %.5f, %.5f)...\n", track_index, quat_get_x(rotation), quat_get_y(rotation), quat_get_z(rotation), quat_get_w(rotation));
+#endif
+				}
+			}
+			else
+			{
+				uint32_t* validity_bitset = m_track_entry_bitsets + (m_bitset_desc.get_size() * rotation_cache_index);
+				Quat_32* cached_samples = safe_ptr_cast<Quat_32>(m_data + (m_track_size * rotation_cache_index));
+
+				uint32_t key0;
+				uint32_t key1;
+				float interpolation_alpha;
+				if (static_condition<distribution == SampleDistribution8::Variable>::test())
+					find_linear_interpolation_samples_with_sample_rate(m_num_samples_per_track_in_segment, m_sample_rate, context.sample_time, SampleRoundingPolicy::None, key0, key1, interpolation_alpha);
+				else
+				{
+					key0 = context.sample_key;
+					key1 = 0;
+					interpolation_alpha = 0.0f;
+				}
+
+				Quat_32 sample0;
+				Quat_32 sample1;
+
+				const BitSetIndexRef bitref0(m_bitset_desc, key0);
+				if (bitset_test(validity_bitset, bitref0))
+				{
+					// Cached
+					sample0 = cached_samples[key0];
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+					printf("Hit cache for sample %u for rotation track %u at bit rate %u...\n", key0, track_index, context.bit_rates.rotation);
+#endif
+				}
+				else
+				{
+					// Not cached
+					if (m_is_rotation_variable)
+						sample0 = get_decayed_rotation_sample(*m_raw_track_database, *m_mutable_track_database, *m_segment, context.track_index, key0, context.bit_rates.rotation);
+					else
+						sample0 = get_decayed_rotation_sample(*m_mutable_track_database, *m_segment, context.track_index, key0, m_rotation_format);
+
+					// If we are uniform, normalize now. Variable will interpolate and normalize after.
+					if (static_condition<distribution == SampleDistribution8::Uniform>::test())
+						sample0 = quat_normalize(sample0);
+
+					cached_samples[key0] = sample0;
+					bitset_set(validity_bitset, bitref0, true);
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+					printf("Cached sample %u for rotation track %u at bit rate %u (%.5f, %.5f, %.5f, %.5f)...\n", key0, track_index, context.bit_rates.rotation, quat_get_x(sample0), quat_get_y(sample0), quat_get_z(sample0), quat_get_w(sample0));
+#endif
+				}
+
+				if (static_condition<distribution == SampleDistribution8::Variable>::test())
+				{
+					const BitSetIndexRef bitref1(m_bitset_desc, key1);
+					if (bitset_test(validity_bitset, bitref1))
+					{
+						// Cached
+						sample1 = cached_samples[key1];
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+						printf("Hit cache for sample %u for rotation track %u at bit rate %u...\n", key1, track_index, context.bit_rates.rotation);
+#endif
+					}
+					else
+					{
+						// Not cached
+						if (m_is_rotation_variable)
+							sample1 = get_decayed_rotation_sample(*m_raw_track_database, *m_mutable_track_database, *m_segment, context.track_index, key1, context.bit_rates.rotation);
+						else
+							sample1 = get_decayed_rotation_sample(*m_mutable_track_database, *m_segment, context.track_index, key1, m_rotation_format);
+
+						cached_samples[key1] = sample1;
+						bitset_set(validity_bitset, bitref1, true);
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+						printf("Cached sample %u for rotation track %u at bit rate %u (%.5f, %.5f, %.5f, %.5f)...\n", key1, track_index, context.bit_rates.rotation, quat_get_x(sample1), quat_get_y(sample1), quat_get_z(sample1), quat_get_w(sample1));
+#endif
+					}
+
+					rotation = quat_lerp(sample0, sample1, interpolation_alpha);
+				}
+				else
+				{
+					rotation = sample0;
+				}
+			}
+
+			return rotation;
+		}
+
+		template<SampleDistribution8 distribution>
+		ACL_FORCE_INLINE Vector4_32 ACL_SIMD_CALL track_bit_rate_database::sample_stream_translation(const sample_context& context, uint32_t translation_cache_index)
 		{
 			const uint32_t track_index = context.track_index;
 			const BoneStreams& bone_stream = m_mutable_bone_streams[track_index];
@@ -830,7 +1097,127 @@ namespace acl
 		}
 
 		template<SampleDistribution8 distribution>
-		ACL_FORCE_INLINE Vector4_32 ACL_SIMD_CALL track_bit_rate_database::sample_scale(const sample_context& context, uint32_t scale_cache_index)
+		ACL_FORCE_INLINE Vector4_32 ACL_SIMD_CALL track_bit_rate_database::sample_database_translation(const sample_context& context, uint32_t translation_cache_index)
+		{
+			const qvvf_ranges& transform_range = m_mutable_track_database->get_range(context.track_index);
+
+			Vector4_32 translation;
+			if (transform_range.is_translation_default)
+				translation = vector_zero_32();
+			else if (transform_range.is_translation_constant)
+			{
+				uint32_t* validity_bitset = m_track_entry_bitsets + (m_bitset_desc.get_size() * translation_cache_index);
+				Vector4_32* cached_samples = safe_ptr_cast<Vector4_32>(m_data + (m_track_size * translation_cache_index));
+
+				if (bitset_test(validity_bitset, m_bitref_constant))
+				{
+					// Cached
+					translation = cached_samples[0];
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+					printf("Hit cache for constant sample for translation track %u...\n", track_index);
+#endif
+				}
+				else
+				{
+					// Not cached
+					translation = get_translation_sample(*m_raw_track_database, *m_segment, context.track_index, 0);
+
+					cached_samples[0] = translation;
+					bitset_set(validity_bitset, m_bitref_constant, true);
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+					printf("Cached constant sample for translation track %u (%.5f, %.5f, %.5f)...\n", track_index, vector_get_x(translation), vector_get_y(translation), vector_get_z(translation));
+#endif
+				}
+			}
+			else
+			{
+				uint32_t* validity_bitset = m_track_entry_bitsets + (m_bitset_desc.get_size() * translation_cache_index);
+				Vector4_32* cached_samples = safe_ptr_cast<Vector4_32>(m_data + (m_track_size * translation_cache_index));
+
+				uint32_t key0;
+				uint32_t key1;
+				float interpolation_alpha;
+				if (static_condition<distribution == SampleDistribution8::Variable>::test())
+					find_linear_interpolation_samples_with_sample_rate(m_num_samples_per_track_in_segment, m_sample_rate, context.sample_time, SampleRoundingPolicy::None, key0, key1, interpolation_alpha);
+				else
+				{
+					key0 = context.sample_key;
+					key1 = 0;
+					interpolation_alpha = 0.0f;
+				}
+
+				Vector4_32 sample0;
+				Vector4_32 sample1;
+
+				const BitSetIndexRef bitref0(m_bitset_desc, key0);
+				if (bitset_test(validity_bitset, bitref0))
+				{
+					// Cached
+					sample0 = cached_samples[key0];
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+					printf("Hit cache for sample %u for translation track %u at bit rate %u...\n", key0, track_index, context.bit_rates.translation);
+#endif
+				}
+				else
+				{
+					// Not cached
+					if (m_is_translation_variable)
+						sample0 = get_decayed_translation_sample(*m_raw_track_database, *m_mutable_track_database, *m_segment, context.track_index, key0, context.bit_rates.translation);
+					else
+						sample0 = get_decayed_translation_sample(*m_mutable_track_database, *m_segment, context.track_index, key0, m_translation_format);
+
+					cached_samples[key0] = sample0;
+					bitset_set(validity_bitset, bitref0, true);
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+					printf("Cached sample %u for translation track %u at bit rate %u (%.5f, %.5f, %.5f)...\n", key0, track_index, context.bit_rates.translation, vector_get_x(sample0), vector_get_y(sample0), vector_get_z(sample0));
+#endif
+				}
+
+				if (static_condition<distribution == SampleDistribution8::Variable>::test())
+				{
+					const BitSetIndexRef bitref1(m_bitset_desc, key1);
+					if (bitset_test(validity_bitset, bitref1))
+					{
+						// Cached
+						sample1 = cached_samples[key1];
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+						printf("Hit cache for sample %u for translation track %u at bit rate %u...\n", key1, track_index, context.bit_rates.translation);
+#endif
+					}
+					else
+					{
+						// Not cached
+						if (m_is_translation_variable)
+							sample1 = get_decayed_translation_sample(*m_raw_track_database, *m_mutable_track_database, *m_segment, context.track_index, key1, context.bit_rates.translation);
+						else
+							sample1 = get_decayed_translation_sample(*m_mutable_track_database, *m_segment, context.track_index, key1, m_translation_format);
+
+						cached_samples[key1] = sample1;
+						bitset_set(validity_bitset, bitref1, true);
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+						printf("Cached sample %u for translation track %u at bit rate %u (%.5f, %.5f, %.5f)...\n", key1, track_index, context.bit_rates.translation, vector_get_x(sample1), vector_get_y(sample1), vector_get_z(sample1));
+#endif
+					}
+
+					translation = vector_lerp(sample0, sample1, interpolation_alpha);
+				}
+				else
+				{
+					translation = sample0;
+				}
+			}
+
+			return translation;
+		}
+
+		template<SampleDistribution8 distribution>
+		ACL_FORCE_INLINE Vector4_32 ACL_SIMD_CALL track_bit_rate_database::sample_stream_scale(const sample_context& context, uint32_t scale_cache_index)
 		{
 			const uint32_t track_index = context.track_index;
 			const BoneStreams& bone_stream = m_mutable_bone_streams[track_index];
@@ -957,6 +1344,126 @@ namespace acl
 			return scale;
 		}
 
+		template<SampleDistribution8 distribution>
+		ACL_FORCE_INLINE Vector4_32 ACL_SIMD_CALL track_bit_rate_database::sample_database_scale(const sample_context& context, uint32_t scale_cache_index)
+		{
+			const qvvf_ranges& transform_range = m_mutable_track_database->get_range(context.track_index);
+
+			Vector4_32 scale;
+			if (transform_range.is_scale_default)
+				scale = m_default_scale;
+			else if (transform_range.is_scale_constant)
+			{
+				uint32_t* validity_bitset = m_track_entry_bitsets + (m_bitset_desc.get_size() * scale_cache_index);
+				Vector4_32* cached_samples = safe_ptr_cast<Vector4_32>(m_data + (m_track_size * scale_cache_index));
+
+				if (bitset_test(validity_bitset, m_bitref_constant))
+				{
+					// Cached
+					scale = cached_samples[0];
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+					printf("Hit cache for constant sample for scale track %u...\n", track_index);
+#endif
+				}
+				else
+				{
+					// Not cached
+					scale = get_scale_sample(*m_raw_track_database, *m_segment, context.track_index, 0);
+
+					cached_samples[0] = scale;
+					bitset_set(validity_bitset, m_bitref_constant, true);
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+					printf("Cached constant sample for scale track %u (%.5f, %.5f, %.5f)...\n", track_index, vector_get_x(scale), vector_get_y(scale), vector_get_z(scale));
+#endif
+				}
+			}
+			else
+			{
+				uint32_t* validity_bitset = m_track_entry_bitsets + (m_bitset_desc.get_size() * scale_cache_index);
+				Vector4_32* cached_samples = safe_ptr_cast<Vector4_32>(m_data + (m_track_size * scale_cache_index));
+
+				uint32_t key0;
+				uint32_t key1;
+				float interpolation_alpha;
+				if (static_condition<distribution == SampleDistribution8::Variable>::test())
+					find_linear_interpolation_samples_with_sample_rate(m_num_samples_per_track_in_segment, m_sample_rate, context.sample_time, SampleRoundingPolicy::None, key0, key1, interpolation_alpha);
+				else
+				{
+					key0 = context.sample_key;
+					key1 = 0;
+					interpolation_alpha = 0.0f;
+				}
+
+				Vector4_32 sample0;
+				Vector4_32 sample1;
+
+				const BitSetIndexRef bitref0(m_bitset_desc, key0);
+				if (bitset_test(validity_bitset, bitref0))
+				{
+					// Cached
+					sample0 = cached_samples[key0];
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+					printf("Hit cache for sample %u for translation track %u at bit rate %u...\n", key0, track_index, context.bit_rates.scale);
+#endif
+				}
+				else
+				{
+					// Not cached
+					if (m_is_scale_variable)
+						sample0 = get_decayed_scale_sample(*m_raw_track_database, *m_mutable_track_database, *m_segment, context.track_index, key0, context.bit_rates.scale);
+					else
+						sample0 = get_decayed_scale_sample(*m_mutable_track_database, *m_segment, context.track_index, key0, m_scale_format);
+
+					cached_samples[key0] = sample0;
+					bitset_set(validity_bitset, bitref0, true);
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+					printf("Cached sample %u for translation track %u at bit rate %u (%.5f, %.5f, %.5f)...\n", key0, track_index, context.bit_rates.scale, vector_get_x(sample0), vector_get_y(sample0), vector_get_z(sample0));
+#endif
+				}
+
+				if (static_condition<distribution == SampleDistribution8::Variable>::test())
+				{
+					const BitSetIndexRef bitref1(m_bitset_desc, key1);
+					if (bitset_test(validity_bitset, bitref1))
+					{
+						// Cached
+						sample1 = cached_samples[key1];
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+						printf("Hit cache for sample %u for translation track %u at bit rate %u...\n", key1, track_index, context.bit_rates.scale);
+#endif
+					}
+					else
+					{
+						// Not cached
+						if (m_is_scale_variable)
+							sample1 = get_decayed_scale_sample(*m_raw_track_database, *m_mutable_track_database, *m_segment, context.track_index, key1, context.bit_rates.scale);
+						else
+							sample1 = get_decayed_scale_sample(*m_mutable_track_database, *m_segment, context.track_index, key1, m_scale_format);
+
+						cached_samples[key1] = sample1;
+						bitset_set(validity_bitset, bitref1, true);
+
+#if ACL_IMPL_DEBUG_DATABASE_IMPL
+						printf("Cached sample %u for translation track %u at bit rate %u (%.5f, %.5f, %.5f)...\n", key1, track_index, context.bit_rates.scale, vector_get_x(sample1), vector_get_y(sample1), vector_get_z(sample1));
+#endif
+					}
+
+					scale = vector_lerp(sample0, sample1, interpolation_alpha);
+				}
+				else
+				{
+					scale = sample0;
+				}
+			}
+
+			return scale;
+		}
+
 		inline void track_bit_rate_database::sample(const single_track_query& query, float sample_time, Transform_32* out_local_pose, uint32_t num_transforms)
 		{
 			ACL_ASSERT(query.m_database == this, "Query has not been built for this database");
@@ -964,34 +1471,47 @@ namespace acl
 			ACL_ASSERT(num_transforms > 0, "Cannot write to empty output local pose");
 			(void)num_transforms;
 
-			const SegmentContext* segment_context = m_mutable_bone_streams->segment;
-
-			uint32_t sample_key;
-			if (segment_context->distribution == SampleDistribution8::Uniform)
-				sample_key = get_uniform_sample_key(*segment_context, sample_time);
-			else
-				sample_key = 0;
-
 			sample_context context;
 			context.track_index = query.m_track_index;
-			context.sample_key = sample_key;
 			context.sample_time = sample_time;
 			context.bit_rates = query.m_bit_rates;
 
 			Quat_32 rotation;
 			Vector4_32 translation;
 			Vector4_32 scale;
-			if (segment_context->distribution == SampleDistribution8::Uniform)
+			if (m_distribution == SampleDistribution8::Uniform)
 			{
-				rotation = sample_rotation<SampleDistribution8::Uniform>(context, query.m_rotation_cache_index);
-				translation = sample_translation<SampleDistribution8::Uniform>(context, query.m_translation_cache_index);
-				scale = sample_scale<SampleDistribution8::Uniform>(context, query.m_scale_cache_index);
+				context.sample_key = get_uniform_sample_key(m_num_samples_per_track_in_clip, m_sample_rate, m_num_samples_per_track_in_segment, m_segment_sample_start_offset, sample_time);
+
+				if (m_use_bone_streams)
+				{
+					rotation = sample_stream_rotation<SampleDistribution8::Uniform>(context, query.m_rotation_cache_index);
+					translation = sample_stream_translation<SampleDistribution8::Uniform>(context, query.m_translation_cache_index);
+					scale = sample_stream_scale<SampleDistribution8::Uniform>(context, query.m_scale_cache_index);
+				}
+				else
+				{
+					rotation = sample_database_rotation<SampleDistribution8::Uniform>(context, query.m_rotation_cache_index);
+					translation = sample_database_translation<SampleDistribution8::Uniform>(context, query.m_translation_cache_index);
+					scale = sample_database_scale<SampleDistribution8::Uniform>(context, query.m_scale_cache_index);
+				}
 			}
 			else
 			{
-				rotation = sample_rotation<SampleDistribution8::Variable>(context, query.m_rotation_cache_index);
-				translation = sample_translation<SampleDistribution8::Variable>(context, query.m_translation_cache_index);
-				scale = sample_scale<SampleDistribution8::Variable>(context, query.m_scale_cache_index);
+				context.sample_key = 0;
+
+				if (m_use_bone_streams)
+				{
+					rotation = sample_stream_rotation<SampleDistribution8::Variable>(context, query.m_rotation_cache_index);
+					translation = sample_stream_translation<SampleDistribution8::Variable>(context, query.m_translation_cache_index);
+					scale = sample_stream_scale<SampleDistribution8::Variable>(context, query.m_scale_cache_index);
+				}
+				else
+				{
+					rotation = sample_database_rotation<SampleDistribution8::Variable>(context, query.m_rotation_cache_index);
+					translation = sample_database_translation<SampleDistribution8::Variable>(context, query.m_translation_cache_index);
+					scale = sample_database_scale<SampleDistribution8::Variable>(context, query.m_scale_cache_index);
+				}
 			}
 
 			out_local_pose[query.m_track_index] = transform_set(rotation, translation, scale);
@@ -1003,54 +1523,75 @@ namespace acl
 			ACL_ASSERT(num_transforms > 0, "Cannot write to empty output local pose");
 			(void)num_transforms;
 
-			const SegmentContext* segment_context = m_mutable_bone_streams->segment;
-
-			uint32_t sample_key;
-			if (segment_context->distribution == SampleDistribution8::Uniform)
-				sample_key = get_uniform_sample_key(*segment_context, sample_time);
-			else
-				sample_key = 0;
-
 			sample_context context;
-			context.sample_key = sample_key;
 			context.sample_time = sample_time;
 
-			if (segment_context->distribution == SampleDistribution8::Uniform)
+			if (m_distribution == SampleDistribution8::Uniform)
 			{
+				context.sample_key = get_uniform_sample_key(m_num_samples_per_track_in_clip, m_sample_rate, m_num_samples_per_track_in_segment, m_segment_sample_start_offset, sample_time);
+
 				uint32_t current_track_index = query.m_track_index;
 				while (current_track_index != k_invalid_bone_index)
 				{
-					const BoneStreams& bone_stream = m_mutable_bone_streams[current_track_index];
 					const hierarchical_track_query::transform_indices& indices = query.m_indices[current_track_index];
 
 					context.track_index = current_track_index;
 					context.bit_rates = query.m_bit_rates[current_track_index];
 
-					const Quat_32 rotation = sample_rotation<SampleDistribution8::Uniform>(context, indices.rotation_cache_index);
-					const Vector4_32 translation = sample_translation<SampleDistribution8::Uniform>(context, indices.translation_cache_index);
-					const Vector4_32 scale = sample_scale<SampleDistribution8::Uniform>(context, indices.scale_cache_index);
+					if (m_use_bone_streams)
+					{
+						const Quat_32 rotation = sample_stream_rotation<SampleDistribution8::Uniform>(context, indices.rotation_cache_index);
+						const Vector4_32 translation = sample_stream_translation<SampleDistribution8::Uniform>(context, indices.translation_cache_index);
+						const Vector4_32 scale = sample_stream_scale<SampleDistribution8::Uniform>(context, indices.scale_cache_index);
 
-					out_local_pose[current_track_index] = transform_set(rotation, translation, scale);
-					current_track_index = bone_stream.parent_bone_index;
+						out_local_pose[current_track_index] = transform_set(rotation, translation, scale);
+
+						current_track_index = m_mutable_bone_streams[current_track_index].parent_bone_index;
+					}
+					else
+					{
+						const Quat_32 rotation = sample_database_rotation<SampleDistribution8::Uniform>(context, indices.rotation_cache_index);
+						const Vector4_32 translation = sample_database_translation<SampleDistribution8::Uniform>(context, indices.translation_cache_index);
+						const Vector4_32 scale = sample_database_scale<SampleDistribution8::Uniform>(context, indices.scale_cache_index);
+
+						out_local_pose[current_track_index] = transform_set(rotation, translation, scale);
+
+						current_track_index = m_mutable_track_database->get_parent_index(current_track_index);
+					}
 				}
 			}
 			else
 			{
+				context.sample_key = 0;
+
 				uint32_t current_track_index = query.m_track_index;
 				while (current_track_index != k_invalid_bone_index)
 				{
-					const BoneStreams& bone_stream = m_mutable_bone_streams[current_track_index];
 					const hierarchical_track_query::transform_indices& indices = query.m_indices[current_track_index];
 
 					context.track_index = current_track_index;
 					context.bit_rates = query.m_bit_rates[current_track_index];
 
-					const Quat_32 rotation = sample_rotation<SampleDistribution8::Variable>(context, indices.rotation_cache_index);
-					const Vector4_32 translation = sample_translation<SampleDistribution8::Variable>(context, indices.translation_cache_index);
-					const Vector4_32 scale = sample_scale<SampleDistribution8::Variable>(context, indices.scale_cache_index);
+					if (m_use_bone_streams)
+					{
+						const Quat_32 rotation = sample_stream_rotation<SampleDistribution8::Variable>(context, indices.rotation_cache_index);
+						const Vector4_32 translation = sample_stream_translation<SampleDistribution8::Variable>(context, indices.translation_cache_index);
+						const Vector4_32 scale = sample_stream_scale<SampleDistribution8::Variable>(context, indices.scale_cache_index);
 
-					out_local_pose[current_track_index] = transform_set(rotation, translation, scale);
-					current_track_index = bone_stream.parent_bone_index;
+						out_local_pose[current_track_index] = transform_set(rotation, translation, scale);
+
+						current_track_index = m_mutable_bone_streams[current_track_index].parent_bone_index;
+					}
+					else
+					{
+						const Quat_32 rotation = sample_database_rotation<SampleDistribution8::Variable>(context, indices.rotation_cache_index);
+						const Vector4_32 translation = sample_database_translation<SampleDistribution8::Variable>(context, indices.translation_cache_index);
+						const Vector4_32 scale = sample_database_scale<SampleDistribution8::Variable>(context, indices.scale_cache_index);
+
+						out_local_pose[current_track_index] = transform_set(rotation, translation, scale);
+
+						current_track_index = m_mutable_track_database->get_parent_index(current_track_index);
+					}
 				}
 			}
 		}

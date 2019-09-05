@@ -145,6 +145,8 @@ namespace acl
 					quat_ensure_positive_w_soa(rotations_x[next_entry_index], rotations_y[next_entry_index], rotations_z[next_entry_index], rotations_w[next_entry_index]);
 				}
 			}
+
+			database.set_rotation_format(rotation_format);
 		}
 	}
 }
