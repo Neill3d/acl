@@ -643,7 +643,7 @@ namespace acl
 				// The sample time is calculated from the full clip duration to be consistent with decompression
 				const float sample_time = min(float(context.segment_sample_start_index + sample_index) / context.sample_rate, context.clip_duration);
 
-				acl_impl::sample_database(context.mutable_tracks_database, *context.segment, sample_time, target_bone_index, context.raw_local_pose);
+				acl_impl::sample_database(context.raw_tracks_database, *context.segment, sample_time, target_bone_index, context.raw_local_pose);
 
 #if ACL_IMPL_USE_DATABASE
 				context.database.sample(context.local_query, sample_time, context.lossy_local_pose, context.num_transforms);
@@ -1135,35 +1135,32 @@ namespace acl
 
 		inline void quantize_all_streams(quantization_context& context)
 		{
-			ACL_ASSERT(context.is_valid(), "QuantizationContext isn't valid");
+			ACL_ASSERT(context.is_valid(), "quantization_context isn't valid");
 
-			const CompressionSettings& settings = context.settings;
-
-			const bool is_rotation_variable = is_rotation_format_variable(settings.rotation_format);
-			const bool is_translation_variable = is_vector_format_variable(settings.translation_format);
-			const bool is_scale_variable = is_vector_format_variable(settings.scale_format);
-
-			for (uint32_t bone_index = 0; bone_index < context.num_transforms; ++bone_index)
+			for (uint32_t transform_index = 0; transform_index < context.num_transforms; ++transform_index)
 			{
-				const BoneBitRate& bone_bit_rate = context.bit_rate_per_bone[bone_index];
+				const BoneBitRate& bone_bit_rate = context.bit_rate_per_bone[transform_index];
 
-				if (is_rotation_variable)
-					quantize_variable_rotation_stream(context, bone_index, bone_bit_rate.rotation);
-				else
-					quantize_fixed_rotation_stream(context, bone_index, settings.rotation_format);
+#if 0
+				//context.local_query.build(transform_index, bone_bit_rate);
 
-				if (is_translation_variable)
-					quantize_variable_translation_stream(context, bone_index, bone_bit_rate.translation);
-				else
-					quantize_fixed_translation_stream(context, bone_index, settings.translation_format);
-
-				if (context.has_scale)
+				for (uint32_t sample_index = 0; sample_index < context.num_samples; ++sample_index)
 				{
-					if (is_scale_variable)
-						quantize_variable_scale_stream(context, bone_index, bone_bit_rate.scale);
-					else
-						quantize_fixed_scale_stream(context, bone_index, settings.scale_format);
+					// The sample time is calculated from the full clip duration to be consistent with decompression
+					//const float sample_time = min(float(context.segment_sample_start_index + sample_index) / context.sample_rate, context.clip_duration);
+
+					//context.database.sample(context.local_query, sample_time, context.lossy_local_pose, context.num_transforms);
+
+					const Transform_32& transform = context.lossy_local_pose[transform_index];
+					context.mutable_tracks_database.set_rotation(transform.rotation, *context.segment, transform_index, sample_index);
+					context.mutable_tracks_database.set_translation(transform.translation, *context.segment, transform_index, sample_index);
+
+					if (context.has_scale)
+						context.mutable_tracks_database.set_scale(transform.scale, *context.segment, transform_index, sample_index);
 				}
+#endif
+
+				context.segment->bit_rates[transform_index] = bone_bit_rate;
 			}
 		}
 

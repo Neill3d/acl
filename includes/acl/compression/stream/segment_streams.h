@@ -193,9 +193,8 @@ namespace acl
 				segment_context* segments = allocate_type_array<segment_context>(allocator, 1);
 				segment_context& segment = segments[0];
 
-				segment.raw_database = nullptr;
-				segment.mutable_database = nullptr;
 				segment.ranges = allocate_type_array<qvvf_ranges>(allocator, num_transforms);
+				segment.bit_rates = allocate_type_array<BoneBitRate>(allocator, num_transforms);
 
 				segment.index = 0;
 
@@ -214,13 +213,10 @@ namespace acl
 
 				segment.distribution = SampleDistribution8::Uniform;
 
-				segment.are_rotations_normalized = false;
-				segment.are_translations_normalized = false;
-				segment.are_scales_normalized = false;
-
-				segment.animated_pose_bit_size = 0;
-				segment.animated_data_size = 0;
+				segment.format_per_track_data_size = 0;
 				segment.range_data_size = 0;
+				segment.animated_data_size = 0;
+				segment.animated_pose_bit_size = 0;
 				segment.total_header_size = 0;
 
 				out_num_segments = 1;
@@ -278,9 +274,8 @@ namespace acl
 				const uint32_t num_samples_in_segment = num_samples_per_segment[segment_index];
 
 				segment_context& segment = segments[segment_index];
-				segment.raw_database = nullptr;
-				segment.mutable_database = nullptr;
 				segment.ranges = allocate_type_array<qvvf_ranges>(allocator, num_transforms);
+				segment.bit_rates = allocate_type_array<BoneBitRate>(allocator, num_transforms);
 
 				segment.index = segment_index;
 
@@ -299,13 +294,10 @@ namespace acl
 
 				segment.distribution = SampleDistribution8::Uniform;
 
-				segment.are_rotations_normalized = false;
-				segment.are_translations_normalized = false;
-				segment.are_scales_normalized = false;
-
-				segment.animated_pose_bit_size = 0;
-				segment.animated_data_size = 0;
+				segment.format_per_track_data_size = 0;
 				segment.range_data_size = 0;
+				segment.animated_data_size = 0;
+				segment.animated_pose_bit_size = 0;
 				segment.total_header_size = 0;
 
 				start_offset += num_samples_in_segment;

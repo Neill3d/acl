@@ -186,6 +186,191 @@ namespace acl
 	{
 		write_range_track_data(clip_context, segment.bone_streams, segment.ranges, range_reduction, false, range_data, range_data_size, output_bone_mapping, num_output_bones);
 	}
+
+	namespace acl_impl
+	{
+		inline uint32_t write_clip_range_data(const track_database& mutable_database, RangeReductionFlags8 range_reduction, const uint16_t* output_transform_mapping, uint16_t num_output_transforms, uint8_t* out_range_data)
+		{
+			const bool has_scale = mutable_database.has_scale();
+			const uint32_t num_rotation_floats = mutable_database.get_rotation_format() == RotationFormat8::Quat_128 ? 4 : 3;
+
+			uint8_t* output_buffer = out_range_data;
+			const uint8_t* output_buffer_start = output_buffer;
+
+			for (uint16_t output_index = 0; output_index < num_output_transforms; ++output_index)
+			{
+				const uint32_t transform_index = output_transform_mapping[output_index];
+				const qvvf_ranges& transform_range = mutable_database.get_range(transform_index);
+
+				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Rotations) && transform_range.is_rotation_animated())
+				{
+					if (out_range_data != nullptr)
+					{
+						const Vector4_32 range_min = vector_unaligned_load(transform_range.rotation_min);
+						const Vector4_32 range_extent = vector_unaligned_load(transform_range.rotation_extent);
+
+						if (num_rotation_floats == 3)
+						{
+							vector_unaligned_write3(range_min, output_buffer);
+							vector_unaligned_write3(range_extent, output_buffer + sizeof(float) * 3);
+						}
+						else
+						{
+							vector_unaligned_write(range_min, output_buffer);
+							vector_unaligned_write(range_extent, output_buffer + sizeof(float) * 4);
+						}
+					}
+
+					output_buffer += sizeof(float) * num_rotation_floats * 2;
+				}
+
+				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Translations) && transform_range.is_translation_animated())
+				{
+					if (out_range_data != nullptr)
+					{
+						const Vector4_32 range_min = vector_unaligned_load(transform_range.translation_min);
+						const Vector4_32 range_extent = vector_unaligned_load(transform_range.translation_extent);
+
+						vector_unaligned_write3(range_min, output_buffer);
+						vector_unaligned_write3(range_extent, output_buffer + sizeof(float) * 3);
+					}
+
+					output_buffer += sizeof(float) * 3 * 2;
+				}
+
+				if (has_scale && are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Scales) && transform_range.is_scale_animated())
+				{
+					if (out_range_data != nullptr)
+					{
+						const Vector4_32 range_min = vector_unaligned_load(transform_range.scale_min);
+						const Vector4_32 range_extent = vector_unaligned_load(transform_range.scale_extent);
+
+						vector_unaligned_write3(range_min, output_buffer);
+						vector_unaligned_write3(range_extent, output_buffer + sizeof(float) * 3);
+					}
+
+					output_buffer += sizeof(float) * 3 * 2;
+				}
+			}
+
+			return safe_static_cast<uint32_t>(output_buffer - output_buffer_start);
+		}
+
+		inline uint32_t write_segment_range_data(const track_database& mutable_database, const segment_context& segment, RangeReductionFlags8 range_reduction, const uint16_t* output_transform_mapping, uint16_t num_output_transforms, uint8_t* out_range_data)
+		{
+			const bool has_scale = mutable_database.has_scale();
+			const uint32_t num_rotation_floats = mutable_database.get_rotation_format() == RotationFormat8::Quat_128 ? 4 : 3;
+
+			uint8_t* output_buffer = out_range_data;
+			const uint8_t* output_buffer_start = output_buffer;
+
+			for (uint16_t output_index = 0; output_index < num_output_transforms; ++output_index)
+			{
+				const uint32_t transform_index = output_transform_mapping[output_index];
+				const qvvf_ranges& transform_range = segment.ranges[transform_index];
+				const BoneBitRate& bit_rate = segment.bit_rates[transform_index];
+
+				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Rotations) && transform_range.is_rotation_animated())
+				{
+					if (mutable_database.get_rotation_format() == RotationFormat8::Quat_128)
+					{
+						if (out_range_data != nullptr)
+						{
+							const Vector4_32 range_min = vector_unaligned_load(transform_range.rotation_min);
+							const Vector4_32 range_extent = vector_unaligned_load(transform_range.rotation_extent);
+
+							pack_vector4_32(range_min, true, output_buffer);
+							pack_vector4_32(range_extent, true, output_buffer + sizeof(uint8_t) * 4);
+						}
+
+						output_buffer += sizeof(uint8_t) * 4 * 2;
+					}
+					else
+					{
+						if (is_constant_bit_rate(bit_rate.rotation))
+						{
+							if (out_range_data != nullptr)
+							{
+								const Vector4_32 sample = mutable_database.get_rotation(segment, transform_index, 0);
+								pack_vector3_u48_unsafe(sample, output_buffer);
+							}
+
+							output_buffer += sizeof(uint16_t) * 3;
+						}
+						else
+						{
+							if (out_range_data != nullptr)
+							{
+								const Vector4_32 range_min = vector_unaligned_load(transform_range.rotation_min);
+								const Vector4_32 range_extent = vector_unaligned_load(transform_range.rotation_extent);
+
+								pack_vector3_u24_unsafe(range_min, output_buffer);
+								pack_vector3_u24_unsafe(range_extent, output_buffer + sizeof(uint8_t) * 3);
+							}
+
+							output_buffer += sizeof(uint8_t) * 3 * 2;
+						}
+					}
+				}
+
+				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Translations) && transform_range.is_translation_animated())
+				{
+					if (is_constant_bit_rate(bit_rate.translation))
+					{
+						if (out_range_data != nullptr)
+						{
+							const Vector4_32 sample = mutable_database.get_translation(segment, transform_index, 0);
+							pack_vector3_u48_unsafe(sample, output_buffer);
+						}
+
+						output_buffer += sizeof(uint16_t) * 3;
+					}
+					else
+					{
+						if (out_range_data != nullptr)
+						{
+							const Vector4_32 range_min = vector_unaligned_load(transform_range.translation_min);
+							const Vector4_32 range_extent = vector_unaligned_load(transform_range.translation_extent);
+
+							pack_vector3_u24_unsafe(range_min, output_buffer);
+							pack_vector3_u24_unsafe(range_extent, output_buffer + sizeof(uint8_t) * 3);
+						}
+
+						output_buffer += sizeof(uint8_t) * 3 * 2;
+					}
+				}
+
+				if (has_scale && are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Scales) && transform_range.is_scale_animated())
+				{
+					if (is_constant_bit_rate(bit_rate.scale))
+					{
+						if (out_range_data != nullptr)
+						{
+							const Vector4_32 sample = mutable_database.get_scale(segment, transform_index, 0);
+							pack_vector3_u48_unsafe(sample, output_buffer);
+						}
+
+						output_buffer += sizeof(uint16_t) * 3;
+					}
+					else
+					{
+						if (out_range_data != nullptr)
+						{
+							const Vector4_32 range_min = vector_unaligned_load(transform_range.scale_min);
+							const Vector4_32 range_extent = vector_unaligned_load(transform_range.scale_extent);
+
+							pack_vector3_u24_unsafe(range_min, output_buffer);
+							pack_vector3_u24_unsafe(range_extent, output_buffer + sizeof(uint8_t) * 3);
+						}
+
+						output_buffer += sizeof(uint8_t) * 3 * 2;
+					}
+				}
+			}
+
+			return safe_static_cast<uint32_t>(output_buffer - output_buffer_start);
+		}
+	}
 }
 
 ACL_IMPL_FILE_PRAGMA_POP

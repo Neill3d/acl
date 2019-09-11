@@ -177,21 +177,20 @@ namespace acl
 			const RotationFormat8 format = database.get_rotation_format();
 			ACL_ASSERT(format == RotationFormat8::Quat_128 || format == RotationFormat8::QuatDropW_96, "Unexpected rotation format");
 
-			const qvvf_ranges& clip_transform_range = database.get_range(transform_index);
-			const qvvf_ranges& segment_transform_range = segment.ranges[transform_index];
-
 			Vector4_32 packed_rotation = database.get_rotation(segment, transform_index, sample_index);
 
-			if (segment_transform_range.are_rotations_normalized)
-			{
-				const Vector4_32 segment_range_min = vector_unaligned_load(segment_transform_range.rotation_min);
-				const Vector4_32 segment_range_extent = vector_unaligned_load(segment_transform_range.rotation_extent);
-
-				packed_rotation = vector_mul_add(packed_rotation, segment_range_extent, segment_range_min);
-			}
-
+			const qvvf_ranges& clip_transform_range = database.get_range(transform_index);
 			if (clip_transform_range.are_rotations_normalized)
 			{
+				const qvvf_ranges& segment_transform_range = segment.ranges[transform_index];
+				if (segment_transform_range.are_rotations_normalized)
+				{
+					const Vector4_32 segment_range_min = vector_unaligned_load(segment_transform_range.rotation_min);
+					const Vector4_32 segment_range_extent = vector_unaligned_load(segment_transform_range.rotation_extent);
+
+					packed_rotation = vector_mul_add(packed_rotation, segment_range_extent, segment_range_min);
+				}
+
 				const Vector4_32 clip_range_min = vector_unaligned_load(clip_transform_range.rotation_min);
 				const Vector4_32 clip_range_extent = vector_unaligned_load(clip_transform_range.rotation_extent);
 
@@ -505,21 +504,20 @@ namespace acl
 			ACL_ASSERT(format == VectorFormat8::Vector3_96, "Unexpected translation format");
 #endif
 
-			const qvvf_ranges& clip_transform_range = database.get_range(transform_index);
-			const qvvf_ranges& segment_transform_range = segment.ranges[transform_index];
-
 			Vector4_32 translation = database.get_translation(segment, transform_index, sample_index);
 
-			if (segment_transform_range.are_translations_normalized)
-			{
-				const Vector4_32 segment_range_min = vector_unaligned_load(segment_transform_range.translation_min);
-				const Vector4_32 segment_range_extent = vector_unaligned_load(segment_transform_range.translation_extent);
-
-				translation = vector_mul_add(translation, segment_range_extent, segment_range_min);
-			}
-
+			const qvvf_ranges& clip_transform_range = database.get_range(transform_index);
 			if (clip_transform_range.are_translations_normalized)
 			{
+				const qvvf_ranges& segment_transform_range = segment.ranges[transform_index];
+				if (segment_transform_range.are_translations_normalized)
+				{
+					const Vector4_32 segment_range_min = vector_unaligned_load(segment_transform_range.translation_min);
+					const Vector4_32 segment_range_extent = vector_unaligned_load(segment_transform_range.translation_extent);
+
+					translation = vector_mul_add(translation, segment_range_extent, segment_range_min);
+				}
+
 				const Vector4_32 clip_range_min = vector_unaligned_load(clip_transform_range.translation_min);
 				const Vector4_32 clip_range_extent = vector_unaligned_load(clip_transform_range.translation_extent);
 
@@ -815,21 +813,20 @@ namespace acl
 			ACL_ASSERT(format == VectorFormat8::Vector3_96, "Unexpected scale format");
 #endif
 
-			const qvvf_ranges& clip_transform_range = database.get_range(transform_index);
-			const qvvf_ranges& segment_transform_range = segment.ranges[transform_index];
-
 			Vector4_32 scale = database.get_translation(segment, transform_index, sample_index);
 
-			if (segment_transform_range.are_scales_normalized)
-			{
-				const Vector4_32 segment_range_min = vector_unaligned_load(segment_transform_range.scale_min);
-				const Vector4_32 segment_range_extent = vector_unaligned_load(segment_transform_range.scale_extent);
-
-				scale = vector_mul_add(scale, segment_range_extent, segment_range_min);
-			}
-
+			const qvvf_ranges& clip_transform_range = database.get_range(transform_index);
 			if (clip_transform_range.are_scales_normalized)
 			{
+				const qvvf_ranges& segment_transform_range = segment.ranges[transform_index];
+				if (segment_transform_range.are_scales_normalized)
+				{
+					const Vector4_32 segment_range_min = vector_unaligned_load(segment_transform_range.scale_min);
+					const Vector4_32 segment_range_extent = vector_unaligned_load(segment_transform_range.scale_extent);
+
+					scale = vector_mul_add(scale, segment_range_extent, segment_range_min);
+				}
+
 				const Vector4_32 clip_range_min = vector_unaligned_load(clip_transform_range.scale_min);
 				const Vector4_32 clip_range_extent = vector_unaligned_load(clip_transform_range.scale_extent);
 

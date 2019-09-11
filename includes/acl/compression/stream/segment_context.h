@@ -126,9 +126,8 @@ namespace acl
 
 		struct segment_context
 		{
-			track_database* raw_database;				// Parent raw track database
-			track_database* mutable_database;			// Parent mutable track database
 			qvvf_ranges* ranges;						// Range information for every track in this segment
+			BoneBitRate* bit_rates;						// Quantization bit rates for every track in this segment
 
 			uint32_t index;								// Which segment this is
 			uint32_t num_transforms;					// Number of transforms (same in every segment)
@@ -143,14 +142,10 @@ namespace acl
 
 			SampleDistribution8 distribution;
 
-			bool are_rotations_normalized;
-			bool are_translations_normalized;
-			bool are_scales_normalized;
-
-			// Stat tracking
-			uint32_t animated_pose_bit_size;
-			uint32_t animated_data_size;
+			uint32_t format_per_track_data_size;
 			uint32_t range_data_size;
+			uint32_t animated_data_size;
+			uint32_t animated_pose_bit_size;
 			uint32_t total_header_size;
 		};
 
@@ -160,6 +155,7 @@ namespace acl
 			{
 				segment_context& segment = segments[segment_index];
 				deallocate_type_array(allocator, segment.ranges, segment.num_transforms);
+				deallocate_type_array(allocator, segment.bit_rates, segment.num_transforms);
 			}
 
 			deallocate_type_array(allocator, segments, num_segments);
