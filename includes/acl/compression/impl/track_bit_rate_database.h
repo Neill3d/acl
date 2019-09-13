@@ -1487,13 +1487,13 @@ namespace acl
 				{
 					rotation = sample_stream_rotation<SampleDistribution8::Uniform>(context, query.m_rotation_cache_index);
 					translation = sample_stream_translation<SampleDistribution8::Uniform>(context, query.m_translation_cache_index);
-					scale = sample_stream_scale<SampleDistribution8::Uniform>(context, query.m_scale_cache_index);
+					scale = m_has_scale ? sample_stream_scale<SampleDistribution8::Uniform>(context, query.m_scale_cache_index) : m_default_scale;
 				}
 				else
 				{
 					rotation = sample_database_rotation<SampleDistribution8::Uniform>(context, query.m_rotation_cache_index);
 					translation = sample_database_translation<SampleDistribution8::Uniform>(context, query.m_translation_cache_index);
-					scale = sample_database_scale<SampleDistribution8::Uniform>(context, query.m_scale_cache_index);
+					scale = m_has_scale ? sample_database_scale<SampleDistribution8::Uniform>(context, query.m_scale_cache_index) : m_default_scale;
 				}
 			}
 			else
@@ -1504,13 +1504,13 @@ namespace acl
 				{
 					rotation = sample_stream_rotation<SampleDistribution8::Variable>(context, query.m_rotation_cache_index);
 					translation = sample_stream_translation<SampleDistribution8::Variable>(context, query.m_translation_cache_index);
-					scale = sample_stream_scale<SampleDistribution8::Variable>(context, query.m_scale_cache_index);
+					scale = m_has_scale ? sample_stream_scale<SampleDistribution8::Variable>(context, query.m_scale_cache_index) : m_default_scale;
 				}
 				else
 				{
 					rotation = sample_database_rotation<SampleDistribution8::Variable>(context, query.m_rotation_cache_index);
 					translation = sample_database_translation<SampleDistribution8::Variable>(context, query.m_translation_cache_index);
-					scale = sample_database_scale<SampleDistribution8::Variable>(context, query.m_scale_cache_index);
+					scale = m_has_scale ? sample_database_scale<SampleDistribution8::Variable>(context, query.m_scale_cache_index) : m_default_scale;
 				}
 			}
 
@@ -1542,7 +1542,7 @@ namespace acl
 					{
 						const Quat_32 rotation = sample_stream_rotation<SampleDistribution8::Uniform>(context, indices.rotation_cache_index);
 						const Vector4_32 translation = sample_stream_translation<SampleDistribution8::Uniform>(context, indices.translation_cache_index);
-						const Vector4_32 scale = sample_stream_scale<SampleDistribution8::Uniform>(context, indices.scale_cache_index);
+						const Vector4_32 scale = m_has_scale ? sample_stream_scale<SampleDistribution8::Uniform>(context, indices.scale_cache_index) : m_default_scale;
 
 						out_local_pose[current_track_index] = transform_set(rotation, translation, scale);
 
@@ -1552,7 +1552,7 @@ namespace acl
 					{
 						const Quat_32 rotation = sample_database_rotation<SampleDistribution8::Uniform>(context, indices.rotation_cache_index);
 						const Vector4_32 translation = sample_database_translation<SampleDistribution8::Uniform>(context, indices.translation_cache_index);
-						const Vector4_32 scale = sample_database_scale<SampleDistribution8::Uniform>(context, indices.scale_cache_index);
+						const Vector4_32 scale = m_has_scale ? sample_database_scale<SampleDistribution8::Uniform>(context, indices.scale_cache_index) : m_default_scale;
 
 						out_local_pose[current_track_index] = transform_set(rotation, translation, scale);
 
@@ -1576,7 +1576,7 @@ namespace acl
 					{
 						const Quat_32 rotation = sample_stream_rotation<SampleDistribution8::Variable>(context, indices.rotation_cache_index);
 						const Vector4_32 translation = sample_stream_translation<SampleDistribution8::Variable>(context, indices.translation_cache_index);
-						const Vector4_32 scale = sample_stream_scale<SampleDistribution8::Variable>(context, indices.scale_cache_index);
+						const Vector4_32 scale = m_has_scale ? sample_stream_scale<SampleDistribution8::Variable>(context, indices.scale_cache_index) : m_default_scale;
 
 						out_local_pose[current_track_index] = transform_set(rotation, translation, scale);
 
@@ -1586,7 +1586,7 @@ namespace acl
 					{
 						const Quat_32 rotation = sample_database_rotation<SampleDistribution8::Variable>(context, indices.rotation_cache_index);
 						const Vector4_32 translation = sample_database_translation<SampleDistribution8::Variable>(context, indices.translation_cache_index);
-						const Vector4_32 scale = sample_database_scale<SampleDistribution8::Variable>(context, indices.scale_cache_index);
+						const Vector4_32 scale = m_has_scale ? sample_database_scale<SampleDistribution8::Variable>(context, indices.scale_cache_index) : m_default_scale;
 
 						out_local_pose[current_track_index] = transform_set(rotation, translation, scale);
 

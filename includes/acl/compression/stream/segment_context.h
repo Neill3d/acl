@@ -146,7 +146,8 @@ namespace acl
 			uint32_t range_data_size;
 			uint32_t animated_data_size;
 			uint32_t animated_pose_bit_size;
-			uint32_t total_header_size;
+			uint32_t total_header_size;					// Size of the segment header: metadata + range info
+			uint32_t total_size;						// Size of the segment
 		};
 
 		inline void destroy_segments(IAllocator& allocator, segment_context* segments, uint32_t num_segments)

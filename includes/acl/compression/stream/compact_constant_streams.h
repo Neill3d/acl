@@ -273,6 +273,7 @@ namespace acl
 		{
 			const Vector4_32 zero = vector_zero_32();
 			const Vector4_32 default_scale = database.get_default_scale();
+			const bool has_scale = database.has_scale();
 
 			const uint32_t num_transforms = database.get_num_transforms();
 			for (uint32_t transform_index = 0; transform_index < num_transforms; ++transform_index)
@@ -311,7 +312,12 @@ namespace acl
 					transform_range.is_translation_default = false;
 				}
 
-				if (is_range_extent_zero(vector_unaligned_load3(transform_range.scale_extent), scale_threshold))
+				if (!has_scale)
+				{
+					transform_range.is_scale_constant = true;
+					transform_range.is_scale_default = true;
+				}
+				else if (is_range_extent_zero(vector_unaligned_load3(transform_range.scale_extent), scale_threshold))
 				{
 					const Vector4_32 scale = database.get_scale(segments[0], transform_index, 0);
 

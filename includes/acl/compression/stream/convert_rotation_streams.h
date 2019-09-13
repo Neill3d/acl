@@ -151,7 +151,8 @@ namespace acl
 				convert_drop_w_track(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries);
 			}
 
-			database.set_rotation_format(rotation_format);
+			const RotationFormat8 highest_bit_rate = get_highest_variant_precision(rotation_variant);
+			database.set_rotation_format(highest_bit_rate);
 		}
 	}
 }

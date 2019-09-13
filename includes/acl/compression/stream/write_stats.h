@@ -520,7 +520,7 @@ namespace acl
 					{
 						segment_writer["segment_index"] = segment.index;
 						segment_writer["num_samples"] = segment.num_samples_per_track;
-						segment_writer["segment_size"] = segment.total_header_size;
+						segment_writer["segment_size"] = segment.total_size;
 						segment_writer["animated_frame_size"] = double(segment.animated_data_size) / double(segment.num_samples_per_track);
 
 						if (are_all_enum_flags_set(stats.logging, StatLogging::Detailed))

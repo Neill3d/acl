@@ -142,9 +142,10 @@ namespace acl
 			IAllocator& allocator;
 
 			acl_impl::track_database& mutable_tracks_database;
-			acl_impl::track_database& raw_tracks_database;			// todo const
-			acl_impl::track_database* additive_base_tracks_database;	// todo const
+			const acl_impl::track_database& raw_tracks_database;
+			const acl_impl::track_database* additive_base_tracks_database;
 
+			const acl_impl::segment_context& first_segment;
 			acl_impl::segment_context* segment;
 
 			const RigidSkeleton& skeleton;
@@ -170,11 +171,13 @@ namespace acl
 
 			BoneBitRate* bit_rate_per_bone;
 
-			quantization_context(IAllocator& allocator_, acl_impl::track_database& mutable_track_database_, acl_impl::track_database& raw_track_database_, acl_impl::track_database* additive_base_track_database_, const CompressionSettings& settings_, const RigidSkeleton& skeleton_)
+			quantization_context(IAllocator& allocator_, acl_impl::track_database& mutable_track_database_, const acl_impl::track_database& raw_track_database_, const acl_impl::track_database* additive_base_track_database_,
+				const CompressionSettings& settings_, const RigidSkeleton& skeleton_, const acl_impl::segment_context& first_segment_)
 				: allocator(allocator_)
 				, mutable_tracks_database(mutable_track_database_)
 				, raw_tracks_database(raw_track_database_)
 				, additive_base_tracks_database(additive_base_track_database_)
+				, first_segment(first_segment_)
 				, segment(nullptr)
 				, skeleton(skeleton_)
 				, settings(settings_)
@@ -1178,7 +1181,7 @@ namespace acl
 			}
 		}
 
-		inline void copy_vector4f_track(uint32_t num_soa_entries, Vector4_32* inputs_x, Vector4_32* inputs_y, Vector4_32* inputs_z, Vector4_32* inputs_w, Vector4_32* outputs_x, Vector4_32* outputs_y, Vector4_32* outputs_z, Vector4_32* outputs_w)
+		inline void copy_vector4f_track(uint32_t num_soa_entries, const Vector4_32* inputs_x, const Vector4_32* inputs_y, const Vector4_32* inputs_z, const Vector4_32* inputs_w, Vector4_32* outputs_x, Vector4_32* outputs_y, Vector4_32* outputs_z, Vector4_32* outputs_w)
 		{
 			// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
 			// TODO: Trivial AVX or ISPC conversion
@@ -1197,7 +1200,7 @@ namespace acl
 			}
 		}
 
-		inline void copy_vector3f_track(uint32_t num_soa_entries, Vector4_32* inputs_x, Vector4_32* inputs_y, Vector4_32* inputs_z, Vector4_32* outputs_x, Vector4_32* outputs_y, Vector4_32* outputs_z)
+		inline void copy_vector3f_track(uint32_t num_soa_entries, const Vector4_32* inputs_x, const Vector4_32* inputs_y, const Vector4_32* inputs_z, Vector4_32* outputs_x, Vector4_32* outputs_y, Vector4_32* outputs_z)
 		{
 			// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
 			// TODO: Trivial AVX or ISPC conversion
@@ -1235,10 +1238,10 @@ namespace acl
 				// We can't use the values in the mutable track database because they have been normalized to the whole segment
 				// and we need them normalized to the clip only.
 
-				Vector4_32* raw_rotations_x;
-				Vector4_32* raw_rotations_y;
-				Vector4_32* raw_rotations_z;
-				Vector4_32* raw_rotations_w;
+				const Vector4_32* raw_rotations_x;
+				const Vector4_32* raw_rotations_y;
+				const Vector4_32* raw_rotations_z;
+				const Vector4_32* raw_rotations_w;
 				context.raw_tracks_database.get_rotations(*context.segment, transform_index, raw_rotations_x, raw_rotations_y, raw_rotations_z, raw_rotations_w);
 
 				// Copy our raw original values
@@ -1268,10 +1271,10 @@ namespace acl
 			{
 				if (is_raw_bit_rate(bit_rate))
 				{
-					Vector4_32* raw_rotations_x;
-					Vector4_32* raw_rotations_y;
-					Vector4_32* raw_rotations_z;
-					Vector4_32* raw_rotations_w;
+					const Vector4_32* raw_rotations_x;
+					const Vector4_32* raw_rotations_y;
+					const Vector4_32* raw_rotations_z;
+					const Vector4_32* raw_rotations_w;
 					context.raw_tracks_database.get_rotations(*context.segment, transform_index, raw_rotations_x, raw_rotations_y, raw_rotations_z, raw_rotations_w);
 
 					// Copy our raw original values
@@ -1403,7 +1406,7 @@ namespace acl
 			{
 				context.mutable_tracks_database.get_translations(*context.segment, transform_index, out_samples_x, out_samples_y, out_samples_z);
 			}
-			static inline void get_raw_samples(quantization_context& context, uint32_t transform_index, Vector4_32*& out_samples_x, Vector4_32*& out_samples_y, Vector4_32*& out_samples_z)
+			static inline void get_raw_samples(quantization_context& context, uint32_t transform_index, const Vector4_32*& out_samples_x, const Vector4_32*& out_samples_y, const Vector4_32*& out_samples_z)
 			{
 				context.raw_tracks_database.get_translations(*context.segment, transform_index, out_samples_x, out_samples_y, out_samples_z);
 			}
@@ -1420,7 +1423,7 @@ namespace acl
 			{
 				context.mutable_tracks_database.get_scales(*context.segment, transform_index, out_samples_x, out_samples_y, out_samples_z);
 			}
-			static inline void get_raw_samples(quantization_context& context, uint32_t transform_index, Vector4_32*& out_samples_x, Vector4_32*& out_samples_y, Vector4_32*& out_samples_z)
+			static inline void get_raw_samples(quantization_context& context, uint32_t transform_index, const Vector4_32*& out_samples_x, const Vector4_32*& out_samples_y, const Vector4_32*& out_samples_z)
 			{
 				context.raw_tracks_database.get_scales(*context.segment, transform_index, out_samples_x, out_samples_y, out_samples_z);
 			}
@@ -1448,9 +1451,9 @@ namespace acl
 				// We can't use the values in the mutable track database because they have been normalized to the whole segment
 				// and we need them normalized to the clip only.
 
-				Vector4_32* raw_samples_x;
-				Vector4_32* raw_samples_y;
-				Vector4_32* raw_samples_z;
+				const Vector4_32* raw_samples_x;
+				const Vector4_32* raw_samples_y;
+				const Vector4_32* raw_samples_z;
 				adapter_type::get_raw_samples(context, transform_index, raw_samples_x, raw_samples_y, raw_samples_z);
 
 				// Copy our raw original values
@@ -1476,9 +1479,9 @@ namespace acl
 			{
 				if (is_raw_bit_rate(bit_rate))
 				{
-					Vector4_32* raw_samples_x;
-					Vector4_32* raw_samples_y;
-					Vector4_32* raw_samples_z;
+					const Vector4_32* raw_samples_x;
+					const Vector4_32* raw_samples_y;
+					const Vector4_32* raw_samples_z;
 					adapter_type::get_raw_samples(context, transform_index, raw_samples_x, raw_samples_y, raw_samples_z);
 
 					// Copy our raw original values
@@ -1592,7 +1595,7 @@ namespace acl
 					Vector4_32* rotations_w;
 					context.mutable_tracks_database.get_rotations(*context.segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
 
-					const Vector4_32 rotation = context.raw_tracks_database.get_rotation(*context.segment, transform_index, 0);
+					const Vector4_32 rotation = context.raw_tracks_database.get_rotation(context.first_segment, transform_index, 0);
 					set_vector4f_track(rotation, num_soa_entries, rotations_x, rotations_y, rotations_z, rotations_w);
 				}
 				else if (is_rotation_format_variable(context.settings.rotation_format))
@@ -1616,7 +1619,7 @@ namespace acl
 					Vector4_32* translations_z;
 					context.mutable_tracks_database.get_translations(*context.segment, transform_index, translations_x, translations_y, translations_z);
 
-					const Vector4_32 translation = context.raw_tracks_database.get_translation(*context.segment, transform_index, 0);
+					const Vector4_32 translation = context.raw_tracks_database.get_translation(context.first_segment, transform_index, 0);
 					set_vector3f_track(translation, num_soa_entries, translations_x, translations_y, translations_z);
 				}
 				else if (is_vector_format_variable(context.settings.translation_format))
@@ -1642,7 +1645,7 @@ namespace acl
 						Vector4_32* scales_z;
 						context.mutable_tracks_database.get_scales(*context.segment, transform_index, scales_x, scales_y, scales_z);
 
-						const Vector4_32 scale = context.raw_tracks_database.get_scale(*context.segment, transform_index, 0);
+						const Vector4_32 scale = context.raw_tracks_database.get_scale(context.first_segment, transform_index, 0);
 						set_vector3f_track(scale, num_soa_entries, scales_x, scales_y, scales_z);
 					}
 					else if (is_vector_format_variable(context.settings.translation_format))
@@ -1653,6 +1656,10 @@ namespace acl
 
 				context.segment->bit_rates[transform_index] = context.bit_rate_per_bone[transform_index];
 			}
+
+			context.mutable_tracks_database.set_rotation_format(context.settings.rotation_format);
+			context.mutable_tracks_database.set_translation_format(context.settings.translation_format);
+			context.mutable_tracks_database.set_scale_format(context.settings.scale_format);
 		}
 
 		template<typename context_type>

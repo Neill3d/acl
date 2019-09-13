@@ -194,6 +194,8 @@ namespace acl
 				segment_context& segment = segments[0];
 
 				segment.ranges = allocate_type_array<qvvf_ranges>(allocator, num_transforms);
+				std::memset(segment.ranges, 0, sizeof(qvvf_ranges) * num_transforms);
+
 				segment.bit_rates = allocate_type_array<BoneBitRate>(allocator, num_transforms);
 
 				segment.index = 0;
@@ -219,6 +221,7 @@ namespace acl
 				segment.animated_data_size = 0;
 				segment.animated_pose_bit_size = 0;
 				segment.total_header_size = 0;
+				segment.total_size = 0;
 
 				out_num_segments = 1;
 				return segments;
@@ -275,7 +278,10 @@ namespace acl
 				const uint32_t num_samples_in_segment = num_samples_per_segment[segment_index];
 
 				segment_context& segment = segments[segment_index];
+
 				segment.ranges = allocate_type_array<qvvf_ranges>(allocator, num_transforms);
+				std::memset(segment.ranges, 0, sizeof(qvvf_ranges) * num_transforms);
+
 				segment.bit_rates = allocate_type_array<BoneBitRate>(allocator, num_transforms);
 
 				segment.index = segment_index;
@@ -301,6 +307,7 @@ namespace acl
 				segment.animated_data_size = 0;
 				segment.animated_pose_bit_size = 0;
 				segment.total_header_size = 0;
+				segment.total_size = 0;
 
 				start_offset += num_samples_in_segment;
 				soa_start_offset += segment_size;

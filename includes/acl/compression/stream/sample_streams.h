@@ -291,7 +291,6 @@ namespace acl
 				rotation = convert_rotation(rotation, raw_format, mutable_format);
 
 				ACL_ASSERT(clip_transform_range.are_rotations_normalized, "Cannot drop a constant track if it isn't normalized");
-				ACL_ASSERT(segment_transform_range.are_rotations_normalized, "Cannot drop a constant track if it isn't normalized");
 
 				const Vector4_32 clip_range_min = vector_unaligned_load(clip_transform_range.rotation_min);
 				const Vector4_32 clip_range_extent = vector_unaligned_load(clip_transform_range.rotation_extent);
@@ -606,8 +605,6 @@ namespace acl
 			{
 				const Vector4_32 translation = raw_database.get_translation(segment, transform_index, 0);
 
-				ACL_ASSERT(segment_transform_range.are_translations_normalized, "Cannot drop a constant track if it isn't normalized");
-
 				const Vector4_32 clip_range_min = vector_unaligned_load(clip_transform_range.translation_min);
 				const Vector4_32 clip_range_extent = vector_unaligned_load(clip_transform_range.translation_extent);
 
@@ -813,7 +810,7 @@ namespace acl
 			ACL_ASSERT(format == VectorFormat8::Vector3_96, "Unexpected scale format");
 #endif
 
-			Vector4_32 scale = database.get_translation(segment, transform_index, sample_index);
+			Vector4_32 scale = database.get_scale(segment, transform_index, sample_index);
 
 			const qvvf_ranges& clip_transform_range = database.get_range(transform_index);
 			if (clip_transform_range.are_scales_normalized)
@@ -914,8 +911,6 @@ namespace acl
 			if (is_constant_bit_rate(desired_bit_rate))
 			{
 				const Vector4_32 scale = raw_database.get_scale(segment, transform_index, 0);
-
-				ACL_ASSERT(segment_transform_range.are_scales_normalized, "Cannot drop a constant track if it isn't normalized");
 
 				const Vector4_32 clip_range_min = vector_unaligned_load(clip_transform_range.scale_min);
 				const Vector4_32 clip_range_extent = vector_unaligned_load(clip_transform_range.scale_extent);
@@ -1632,6 +1627,9 @@ namespace acl
 	{
 		inline void sample_database(const track_database& database, const segment_context& segment, float sample_time, uint32_t transform_index, Transform_32* out_local_pose)
 		{
+			const Vector4_32 default_scale = database.get_default_scale();
+			const bool has_scale = database.has_scale();
+
 			acl_impl::sample_context context;
 			context.track_index = transform_index;
 			context.sample_time = sample_time;
@@ -1650,7 +1648,7 @@ namespace acl
 
 				rotation = sample_rotation<SampleDistribution8::Uniform>(context, database, segment);
 				translation = sample_translation<SampleDistribution8::Uniform>(context, database, segment);
-				scale = sample_scale<SampleDistribution8::Uniform>(context, database, segment);
+				scale = has_scale ? sample_scale<SampleDistribution8::Uniform>(context, database, segment) : default_scale;
 			}
 			else
 			{
@@ -1658,7 +1656,7 @@ namespace acl
 
 				rotation = sample_rotation<SampleDistribution8::Variable>(context, database, segment);
 				translation = sample_translation<SampleDistribution8::Variable>(context, database, segment);
-				scale = sample_scale<SampleDistribution8::Variable>(context, database, segment);
+				scale = has_scale ? sample_scale<SampleDistribution8::Variable>(context, database, segment) : default_scale;
 			}
 
 			out_local_pose[transform_index] = transform_set(rotation, translation, scale);
@@ -1723,6 +1721,9 @@ namespace acl
 	{
 		inline void sample_database_hierarchical(const track_database& database, const segment_context& segment, float sample_time, uint32_t target_transform_index, Transform_32* out_local_pose)
 		{
+			const Vector4_32 default_scale = database.get_default_scale();
+			const bool has_scale = database.has_scale();
+
 			acl_impl::sample_context context;
 			context.sample_time = sample_time;
 
@@ -1742,7 +1743,7 @@ namespace acl
 
 					const Quat_32 rotation = sample_rotation<SampleDistribution8::Uniform>(context, database, segment);
 					const Vector4_32 translation = sample_translation<SampleDistribution8::Uniform>(context, database, segment);
-					const Vector4_32 scale = sample_scale<SampleDistribution8::Uniform>(context, database, segment);
+					const Vector4_32 scale = has_scale ? sample_scale<SampleDistribution8::Uniform>(context, database, segment) : default_scale;
 
 					out_local_pose[current_transform_index] = transform_set(rotation, translation, scale);
 					current_transform_index = database.get_parent_index(current_transform_index);
@@ -1759,7 +1760,7 @@ namespace acl
 
 					const Quat_32 rotation = sample_rotation<SampleDistribution8::Variable>(context, database, segment);
 					const Vector4_32 translation = sample_translation<SampleDistribution8::Variable>(context, database, segment);
-					const Vector4_32 scale = sample_scale<SampleDistribution8::Variable>(context, database, segment);
+					const Vector4_32 scale = has_scale ? sample_scale<SampleDistribution8::Variable>(context, database, segment) : default_scale;
 
 					out_local_pose[current_transform_index] = transform_set(rotation, translation, scale);
 					current_transform_index = database.get_parent_index(current_transform_index);

@@ -433,8 +433,6 @@ namespace acl
 			uint8_t* output_buffer = out_animated_track_data;
 			const uint8_t* output_buffer_start = output_buffer;
 
-			alignas(16) uint8_t buffer[128];
-
 			uint64_t bit_offset = 0;
 			uint64_t pose_bit_size = 0;
 
@@ -458,13 +456,13 @@ namespace acl
 							if (out_animated_track_data != nullptr)
 							{
 								const Vector4_32 sample = mutable_database.get_rotation(segment, transform_index, sample_index);
+								const uint32_t* sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
 
 								if (is_raw_bit_rate(bit_rate.rotation))
 								{
-									const uint32_t* raw_sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
-									const uint32_t x = byte_swap(raw_sample_u32[0]);
-									const uint32_t y = byte_swap(raw_sample_u32[1]);
-									const uint32_t z = byte_swap(raw_sample_u32[2]);
+									const uint32_t x = byte_swap(sample_u32[0]);
+									const uint32_t y = byte_swap(sample_u32[1]);
+									const uint32_t z = byte_swap(sample_u32[2]);
 
 									memcpy_bits(out_animated_track_data, bit_offset + 0, &x, 0, 32);
 									memcpy_bits(out_animated_track_data, bit_offset + 32, &y, 0, 32);
@@ -472,8 +470,12 @@ namespace acl
 								}
 								else
 								{
-									pack_vector3_uXX_unsafe(sample, num_bits_per_component, buffer);
-									memcpy_bits(out_animated_track_data, bit_offset, buffer, 0, num_bits_at_bit_rate);
+									uint64_t vector_u64 = static_cast<uint64_t>(sample_u32[0]) << (64 - num_bits_per_component * 1);
+									vector_u64 |= static_cast<uint64_t>(sample_u32[1]) << (64 - num_bits_per_component * 2);
+									vector_u64 |= static_cast<uint64_t>(sample_u32[2]) << (64 - num_bits_per_component * 3);
+									vector_u64 = byte_swap(vector_u64);
+
+									memcpy_bits(out_animated_track_data, bit_offset, &vector_u64, 0, num_bits_at_bit_rate);
 								}
 							}
 
@@ -511,10 +513,12 @@ namespace acl
 								if (out_animated_track_data != nullptr)
 								{
 									const Vector4_32 sample = mutable_database.get_rotation(segment, transform_index, sample_index);
-									if (transform_range.are_rotations_normalized)
-										pack_vector3_u48_unsafe(sample, output_buffer);
-									else
-										pack_vector3_s48_unsafe(sample, output_buffer);
+									const uint32_t* sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
+
+									uint16_t* data = safe_ptr_cast<uint16_t>(output_buffer);
+									data[0] = safe_static_cast<uint16_t>(sample_u32[0]);
+									data[1] = safe_static_cast<uint16_t>(sample_u32[1]);
+									data[2] = safe_static_cast<uint16_t>(sample_u32[2]);
 								}
 
 								output_buffer += sizeof(uint16_t) * 3;
@@ -524,7 +528,14 @@ namespace acl
 								if (out_animated_track_data != nullptr)
 								{
 									const Vector4_32 sample = mutable_database.get_rotation(segment, transform_index, sample_index);
-									pack_vector3_32(sample, 11, 11, 10, transform_range.are_rotations_normalized, output_buffer);
+									const uint32_t* sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
+
+									const uint32_t packed_u32 = (sample_u32[0] << (11 + 10)) | (sample_u32[1] << 10) | sample_u32[2];
+
+									// Written 2 bytes at a time to ensure safe alignment
+									uint16_t* data = safe_ptr_cast<uint16_t>(output_buffer);
+									data[0] = safe_static_cast<uint16_t>(packed_u32 >> 16);
+									data[1] = safe_static_cast<uint16_t>(packed_u32 & 0xFFFF);
 								}
 
 								output_buffer += sizeof(uint32_t);
@@ -547,13 +558,13 @@ namespace acl
 							if (out_animated_track_data != nullptr)
 							{
 								const Vector4_32 sample = mutable_database.get_translation(segment, transform_index, sample_index);
+								const uint32_t* sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
 
 								if (is_raw_bit_rate(bit_rate.translation))
 								{
-									const uint32_t* raw_sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
-									const uint32_t x = byte_swap(raw_sample_u32[0]);
-									const uint32_t y = byte_swap(raw_sample_u32[1]);
-									const uint32_t z = byte_swap(raw_sample_u32[2]);
+									const uint32_t x = byte_swap(sample_u32[0]);
+									const uint32_t y = byte_swap(sample_u32[1]);
+									const uint32_t z = byte_swap(sample_u32[2]);
 
 									memcpy_bits(out_animated_track_data, bit_offset + 0, &x, 0, 32);
 									memcpy_bits(out_animated_track_data, bit_offset + 32, &y, 0, 32);
@@ -561,8 +572,12 @@ namespace acl
 								}
 								else
 								{
-									pack_vector3_uXX_unsafe(sample, num_bits_per_component, buffer);
-									memcpy_bits(out_animated_track_data, bit_offset, buffer, 0, num_bits_at_bit_rate);
+									uint64_t vector_u64 = static_cast<uint64_t>(sample_u32[0]) << (64 - num_bits_per_component * 1);
+									vector_u64 |= static_cast<uint64_t>(sample_u32[1]) << (64 - num_bits_per_component * 2);
+									vector_u64 |= static_cast<uint64_t>(sample_u32[2]) << (64 - num_bits_per_component * 3);
+									vector_u64 = byte_swap(vector_u64);
+
+									memcpy_bits(out_animated_track_data, bit_offset, &vector_u64, 0, num_bits_at_bit_rate);
 								}
 							}
 
@@ -590,8 +605,12 @@ namespace acl
 								if (out_animated_track_data != nullptr)
 								{
 									const Vector4_32 sample = mutable_database.get_translation(segment, transform_index, sample_index);
-									ACL_ASSERT(transform_range.are_translations_normalized, "Samples must be normalized with this format");
-									pack_vector3_u48_unsafe(sample, output_buffer);
+									const uint32_t* sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
+
+									uint16_t* data = safe_ptr_cast<uint16_t>(output_buffer);
+									data[0] = safe_static_cast<uint16_t>(sample_u32[0]);
+									data[1] = safe_static_cast<uint16_t>(sample_u32[1]);
+									data[2] = safe_static_cast<uint16_t>(sample_u32[2]);
 								}
 
 								output_buffer += sizeof(uint16_t) * 3;
@@ -601,8 +620,14 @@ namespace acl
 								if (out_animated_track_data != nullptr)
 								{
 									const Vector4_32 sample = mutable_database.get_translation(segment, transform_index, sample_index);
-									ACL_ASSERT(transform_range.are_translations_normalized, "Samples must be normalized with this format");
-									pack_vector3_32(sample, 11, 11, 10, true, output_buffer);
+									const uint32_t* sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
+
+									const uint32_t packed_u32 = (sample_u32[0] << (11 + 10)) | (sample_u32[1] << 10) | sample_u32[2];
+
+									// Written 2 bytes at a time to ensure safe alignment
+									uint16_t* data = safe_ptr_cast<uint16_t>(output_buffer);
+									data[0] = safe_static_cast<uint16_t>(packed_u32 >> 16);
+									data[1] = safe_static_cast<uint16_t>(packed_u32 & 0xFFFF);
 								}
 
 								output_buffer += sizeof(uint32_t);
@@ -625,13 +650,13 @@ namespace acl
 							if (out_animated_track_data != nullptr)
 							{
 								const Vector4_32 sample = mutable_database.get_scale(segment, transform_index, sample_index);
+								const uint32_t* sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
 
 								if (is_raw_bit_rate(bit_rate.scale))
 								{
-									const uint32_t* raw_sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
-									const uint32_t x = byte_swap(raw_sample_u32[0]);
-									const uint32_t y = byte_swap(raw_sample_u32[1]);
-									const uint32_t z = byte_swap(raw_sample_u32[2]);
+									const uint32_t x = byte_swap(sample_u32[0]);
+									const uint32_t y = byte_swap(sample_u32[1]);
+									const uint32_t z = byte_swap(sample_u32[2]);
 
 									memcpy_bits(out_animated_track_data, bit_offset + 0, &x, 0, 32);
 									memcpy_bits(out_animated_track_data, bit_offset + 32, &y, 0, 32);
@@ -639,8 +664,12 @@ namespace acl
 								}
 								else
 								{
-									pack_vector3_uXX_unsafe(sample, num_bits_per_component, buffer);
-									memcpy_bits(out_animated_track_data, bit_offset, buffer, 0, num_bits_at_bit_rate);
+									uint64_t vector_u64 = static_cast<uint64_t>(sample_u32[0]) << (64 - num_bits_per_component * 1);
+									vector_u64 |= static_cast<uint64_t>(sample_u32[1]) << (64 - num_bits_per_component * 2);
+									vector_u64 |= static_cast<uint64_t>(sample_u32[2]) << (64 - num_bits_per_component * 3);
+									vector_u64 = byte_swap(vector_u64);
+
+									memcpy_bits(out_animated_track_data, bit_offset, &vector_u64, 0, num_bits_at_bit_rate);
 								}
 							}
 
@@ -668,8 +697,12 @@ namespace acl
 								if (out_animated_track_data != nullptr)
 								{
 									const Vector4_32 sample = mutable_database.get_scale(segment, transform_index, sample_index);
-									ACL_ASSERT(transform_range.are_scales_normalized, "Samples must be normalized with this format");
-									pack_vector3_u48_unsafe(sample, output_buffer);
+									const uint32_t* sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
+
+									uint16_t* data = safe_ptr_cast<uint16_t>(output_buffer);
+									data[0] = safe_static_cast<uint16_t>(sample_u32[0]);
+									data[1] = safe_static_cast<uint16_t>(sample_u32[1]);
+									data[2] = safe_static_cast<uint16_t>(sample_u32[2]);
 								}
 
 								output_buffer += sizeof(uint16_t) * 3;
@@ -679,8 +712,14 @@ namespace acl
 								if (out_animated_track_data != nullptr)
 								{
 									const Vector4_32 sample = mutable_database.get_scale(segment, transform_index, sample_index);
-									ACL_ASSERT(transform_range.are_scales_normalized, "Samples must be normalized with this format");
-									pack_vector3_32(sample, 11, 11, 10, true, output_buffer);
+									const uint32_t* sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
+
+									const uint32_t packed_u32 = (sample_u32[0] << (11 + 10)) | (sample_u32[1] << 10) | sample_u32[2];
+
+									// Written 2 bytes at a time to ensure safe alignment
+									uint16_t* data = safe_ptr_cast<uint16_t>(output_buffer);
+									data[0] = safe_static_cast<uint16_t>(packed_u32 >> 16);
+									data[1] = safe_static_cast<uint16_t>(packed_u32 & 0xFFFF);
 								}
 
 								output_buffer += sizeof(uint32_t);
