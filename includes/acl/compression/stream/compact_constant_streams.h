@@ -328,6 +328,25 @@ namespace acl
 				}
 			}
 		}
+
+		inline void detect_segment_constant_tracks(const track_database& database, segment_context& segment)
+		{
+			const uint32_t num_transforms = database.get_num_transforms();
+			for (uint32_t transform_index = 0; transform_index < num_transforms; ++transform_index)
+			{
+				const qvvf_ranges& transform_clip_range = database.get_range(transform_index);
+				qvvf_ranges& transform_segment_range = segment.ranges[transform_index];
+
+				transform_segment_range.is_rotation_constant = transform_clip_range.is_rotation_constant;
+				transform_segment_range.is_rotation_default = transform_clip_range.is_rotation_default;
+
+				transform_segment_range.is_translation_constant = transform_clip_range.is_translation_constant;
+				transform_segment_range.is_translation_default = transform_clip_range.is_translation_default;
+
+				transform_segment_range.is_scale_constant = transform_clip_range.is_scale_constant;
+				transform_segment_range.is_scale_default = transform_clip_range.is_scale_default;
+			}
+		}
 	}
 }
 

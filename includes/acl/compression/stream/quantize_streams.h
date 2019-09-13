@@ -1133,34 +1133,525 @@ namespace acl
 			}
 		}
 
+		inline void ACL_SIMD_CALL set_vector4f_track(Vector4_32Arg0 value, uint32_t num_soa_entries, Vector4_32* inputs_x, Vector4_32* inputs_y, Vector4_32* inputs_z, Vector4_32* inputs_w)
+		{
+			const Vector4_32 xxxx = vector_mix_xxxx(value);
+			const Vector4_32 yyyy = vector_mix_yyyy(value);
+			const Vector4_32 zzzz = vector_mix_zzzz(value);
+			const Vector4_32 wwww = vector_mix_wwww(value);
+
+			// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+			// TODO: Trivial AVX or ISPC conversion
+			for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+			{
+				inputs_x[entry_index] = xxxx;
+				inputs_y[entry_index] = yyyy;
+				inputs_z[entry_index] = zzzz;
+				inputs_w[entry_index] = wwww;
+
+				const uint32_t next_entry_index = entry_index + 1;
+				inputs_x[next_entry_index] = xxxx;
+				inputs_y[next_entry_index] = yyyy;
+				inputs_z[next_entry_index] = zzzz;
+				inputs_w[next_entry_index] = wwww;
+			}
+		}
+
+		inline void ACL_SIMD_CALL set_vector3f_track(Vector4_32Arg0 value, uint32_t num_soa_entries, Vector4_32* inputs_x, Vector4_32* inputs_y, Vector4_32* inputs_z)
+		{
+			const Vector4_32 xxxx = vector_mix_xxxx(value);
+			const Vector4_32 yyyy = vector_mix_yyyy(value);
+			const Vector4_32 zzzz = vector_mix_zzzz(value);
+
+			// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+			// TODO: Trivial AVX or ISPC conversion
+			for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+			{
+				inputs_x[entry_index] = xxxx;
+				inputs_y[entry_index] = yyyy;
+				inputs_z[entry_index] = zzzz;
+
+				const uint32_t next_entry_index = entry_index + 1;
+				inputs_x[next_entry_index] = xxxx;
+				inputs_y[next_entry_index] = yyyy;
+				inputs_z[next_entry_index] = zzzz;
+			}
+		}
+
+		inline void copy_vector4f_track(uint32_t num_soa_entries, Vector4_32* inputs_x, Vector4_32* inputs_y, Vector4_32* inputs_z, Vector4_32* inputs_w, Vector4_32* outputs_x, Vector4_32* outputs_y, Vector4_32* outputs_z, Vector4_32* outputs_w)
+		{
+			// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+			// TODO: Trivial AVX or ISPC conversion
+			for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+			{
+				outputs_x[entry_index] = inputs_x[entry_index];
+				outputs_y[entry_index] = inputs_y[entry_index];
+				outputs_z[entry_index] = inputs_z[entry_index];
+				outputs_w[entry_index] = inputs_w[entry_index];
+
+				const uint32_t next_entry_index = entry_index + 1;
+				outputs_x[next_entry_index] = inputs_x[next_entry_index];
+				outputs_y[next_entry_index] = inputs_y[next_entry_index];
+				outputs_z[next_entry_index] = inputs_z[next_entry_index];
+				outputs_w[next_entry_index] = inputs_w[next_entry_index];
+			}
+		}
+
+		inline void copy_vector3f_track(uint32_t num_soa_entries, Vector4_32* inputs_x, Vector4_32* inputs_y, Vector4_32* inputs_z, Vector4_32* outputs_x, Vector4_32* outputs_y, Vector4_32* outputs_z)
+		{
+			// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+			// TODO: Trivial AVX or ISPC conversion
+			for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+			{
+				outputs_x[entry_index] = inputs_x[entry_index];
+				outputs_y[entry_index] = inputs_y[entry_index];
+				outputs_z[entry_index] = inputs_z[entry_index];
+
+				const uint32_t next_entry_index = entry_index + 1;
+				outputs_x[next_entry_index] = inputs_x[next_entry_index];
+				outputs_y[next_entry_index] = inputs_y[next_entry_index];
+				outputs_z[next_entry_index] = inputs_z[next_entry_index];
+			}
+		}
+
+		inline void quantize_variable_rotation_track(quantization_context& context, uint32_t transform_index, const acl_impl::qvvf_ranges& transform_range)
+		{
+			using namespace acl_impl;
+			ACL_ASSERT(get_rotation_variant(context.settings.rotation_format) == RotationVariant8::QuatDropW, "Unexpected variant");
+
+			const uint8_t bit_rate = context.bit_rate_per_bone[transform_index].rotation;
+			const uint32_t num_soa_entries = context.segment->num_soa_entries;
+
+			Vector4_32* rotations_x;
+			Vector4_32* rotations_y;
+			Vector4_32* rotations_z;
+			Vector4_32* rotations_w;
+			context.mutable_tracks_database.get_rotations(*context.segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
+
+			if (is_constant_bit_rate(bit_rate))
+			{
+				ACL_ASSERT(transform_range.are_rotations_normalized, "Cannot drop a constant track if it isn't normalized");
+
+				// We can't use the values in the mutable track database because they have been normalized to the whole segment
+				// and we need them normalized to the clip only.
+
+				Vector4_32* raw_rotations_x;
+				Vector4_32* raw_rotations_y;
+				Vector4_32* raw_rotations_z;
+				Vector4_32* raw_rotations_w;
+				context.raw_tracks_database.get_rotations(*context.segment, transform_index, raw_rotations_x, raw_rotations_y, raw_rotations_z, raw_rotations_w);
+
+				// Copy our raw original values
+				copy_vector4f_track(num_soa_entries, raw_rotations_x, raw_rotations_y, raw_rotations_z, raw_rotations_w, rotations_x, rotations_y, rotations_z, rotations_w);
+
+				// Convert our track
+				// Drop W, we just ensure it is positive and write it back, the W component can be ignored and trivially reconstructed afterwards
+				convert_drop_w_track(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries);
+
+				// Normalize to our clip range
+				normalize_vector4f_track(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries, transform_range.rotation_min, transform_range.rotation_extent);
+
+				// Quantize and pack our values into place on 16 bits per component
+				const StaticQuantizationScales<16> scales;
+
+				// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+				// TODO: Trivial AVX or ISPC conversion
+				for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+				{
+					pack_vector3_u48_soa(rotations_x[entry_index], rotations_y[entry_index], rotations_z[entry_index], scales);
+
+					const uint32_t next_entry_index = entry_index + 1;
+					pack_vector3_u48_soa(rotations_x[next_entry_index], rotations_y[next_entry_index], rotations_z[next_entry_index], scales);
+				}
+			}
+			else
+			{
+				if (is_raw_bit_rate(bit_rate))
+				{
+					Vector4_32* raw_rotations_x;
+					Vector4_32* raw_rotations_y;
+					Vector4_32* raw_rotations_z;
+					Vector4_32* raw_rotations_w;
+					context.raw_tracks_database.get_rotations(*context.segment, transform_index, raw_rotations_x, raw_rotations_y, raw_rotations_z, raw_rotations_w);
+
+					// Copy our raw original values
+					copy_vector4f_track(num_soa_entries, raw_rotations_x, raw_rotations_y, raw_rotations_z, raw_rotations_w, rotations_x, rotations_y, rotations_z, rotations_w);
+
+					// Convert our track
+					// Drop W, we just ensure it is positive and write it back, the W component can be ignored and trivially reconstructed afterwards
+					convert_drop_w_track(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries);
+				}
+				else
+				{
+					const uint32_t num_bits_at_bit_rate = get_num_bits_at_bit_rate(bit_rate);
+					const QuantizationScales scales(num_bits_at_bit_rate);
+
+					if (transform_range.are_rotations_normalized)
+					{
+						// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+						// TODO: Trivial AVX or ISPC conversion
+						for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+						{
+							pack_vector3_uXX_soa(rotations_x[entry_index], rotations_y[entry_index], rotations_z[entry_index], scales);
+
+							const uint32_t next_entry_index = entry_index + 1;
+							pack_vector3_uXX_soa(rotations_x[next_entry_index], rotations_y[next_entry_index], rotations_z[next_entry_index], scales);
+						}
+					}
+					else
+					{
+						// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+						// TODO: Trivial AVX or ISPC conversion
+						for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+						{
+							pack_vector3_sXX_soa(rotations_x[entry_index], rotations_y[entry_index], rotations_z[entry_index], scales);
+
+							const uint32_t next_entry_index = entry_index + 1;
+							pack_vector3_sXX_soa(rotations_x[next_entry_index], rotations_y[next_entry_index], rotations_z[next_entry_index], scales);
+						}
+					}
+				}
+			}
+		}
+
+		inline void quantize_fixed_rotation_track(quantization_context& context, uint32_t transform_index, const acl_impl::qvvf_ranges& transform_range)
+		{
+			using namespace acl_impl;
+
+			const StaticQuantizationScales<16> scales16;
+			const QuantizationScales scales11(11);
+			const QuantizationScales scales10(10);
+
+			const uint32_t num_soa_entries = context.segment->num_soa_entries;
+
+			Vector4_32* rotations_x;
+			Vector4_32* rotations_y;
+			Vector4_32* rotations_z;
+			Vector4_32* rotations_w;
+			context.mutable_tracks_database.get_rotations(*context.segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
+
+			switch (context.settings.rotation_format)
+			{
+			case RotationFormat8::Quat_128:
+			case RotationFormat8::QuatDropW_96:
+				// Nothing to do, mutable database already contains what we need
+				break;
+			case RotationFormat8::QuatDropW_48:
+				if (transform_range.are_rotations_normalized)
+				{
+					// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+					// TODO: Trivial AVX or ISPC conversion
+					for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+					{
+						pack_vector3_u48_soa(rotations_x[entry_index], rotations_y[entry_index], rotations_z[entry_index], scales16);
+
+						const uint32_t next_entry_index = entry_index + 1;
+						pack_vector3_u48_soa(rotations_x[next_entry_index], rotations_y[next_entry_index], rotations_z[next_entry_index], scales16);
+					}
+				}
+				else
+				{
+					// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+					// TODO: Trivial AVX or ISPC conversion
+					for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+					{
+						pack_vector3_s48_soa(rotations_x[entry_index], rotations_y[entry_index], rotations_z[entry_index], scales16);
+
+						const uint32_t next_entry_index = entry_index + 1;
+						pack_vector3_s48_soa(rotations_x[next_entry_index], rotations_y[next_entry_index], rotations_z[next_entry_index], scales16);
+					}
+				}
+				break;
+			case RotationFormat8::QuatDropW_32:
+				if (transform_range.are_rotations_normalized)
+				{
+					// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+					// TODO: Trivial AVX or ISPC conversion
+					for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+					{
+						pack_vector3_u32_soa(rotations_x[entry_index], rotations_y[entry_index], rotations_z[entry_index], scales11, scales11, scales10);
+
+						const uint32_t next_entry_index = entry_index + 1;
+						pack_vector3_u32_soa(rotations_x[next_entry_index], rotations_y[next_entry_index], rotations_z[next_entry_index], scales11, scales11, scales10);
+					}
+				}
+				else
+				{
+					// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+					// TODO: Trivial AVX or ISPC conversion
+					for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+					{
+						pack_vector3_s32_soa(rotations_x[entry_index], rotations_y[entry_index], rotations_z[entry_index], scales11, scales11, scales10);
+
+						const uint32_t next_entry_index = entry_index + 1;
+						pack_vector3_s32_soa(rotations_x[next_entry_index], rotations_y[next_entry_index], rotations_z[next_entry_index], scales11, scales11, scales10);
+					}
+				}
+				break;
+			case RotationFormat8::QuatDropW_Variable:
+			default:
+				ACL_ASSERT(false, "Invalid or unsupported rotation format: %s", get_rotation_format_name(context.settings.rotation_format));
+				break;
+			}
+		}
+
+		struct translation_track_adapter
+		{
+			static inline bool are_samples_normalized(const acl_impl::qvvf_ranges& transform_range) { return transform_range.are_translations_normalized; }
+			static inline uint8_t get_bit_rate(quantization_context& context, uint32_t transform_index) { return context.bit_rate_per_bone[transform_index].translation; }
+			static inline void get_mutable_samples(quantization_context& context, uint32_t transform_index, Vector4_32*& out_samples_x, Vector4_32*& out_samples_y, Vector4_32*& out_samples_z)
+			{
+				context.mutable_tracks_database.get_translations(*context.segment, transform_index, out_samples_x, out_samples_y, out_samples_z);
+			}
+			static inline void get_raw_samples(quantization_context& context, uint32_t transform_index, Vector4_32*& out_samples_x, Vector4_32*& out_samples_y, Vector4_32*& out_samples_z)
+			{
+				context.raw_tracks_database.get_translations(*context.segment, transform_index, out_samples_x, out_samples_y, out_samples_z);
+			}
+			static inline auto get_range_min(const acl_impl::qvvf_ranges& transform_range) { return transform_range.translation_min; }
+			static inline auto get_range_extent(const acl_impl::qvvf_ranges& transform_range) { return transform_range.translation_extent; }
+			static inline VectorFormat8 get_vector_format(const quantization_context& context) { return context.settings.translation_format; }
+		};
+
+		struct scale_track_adapter
+		{
+			static inline bool are_samples_normalized(const acl_impl::qvvf_ranges& transform_range) { return transform_range.are_scales_normalized; }
+			static inline uint8_t get_bit_rate(quantization_context& context, uint32_t transform_index) { return context.bit_rate_per_bone[transform_index].scale; }
+			static inline void get_mutable_samples(quantization_context& context, uint32_t transform_index, Vector4_32*& out_samples_x, Vector4_32*& out_samples_y, Vector4_32*& out_samples_z)
+			{
+				context.mutable_tracks_database.get_scales(*context.segment, transform_index, out_samples_x, out_samples_y, out_samples_z);
+			}
+			static inline void get_raw_samples(quantization_context& context, uint32_t transform_index, Vector4_32*& out_samples_x, Vector4_32*& out_samples_y, Vector4_32*& out_samples_z)
+			{
+				context.raw_tracks_database.get_scales(*context.segment, transform_index, out_samples_x, out_samples_y, out_samples_z);
+			}
+			static inline auto get_range_min(const acl_impl::qvvf_ranges& transform_range) { return transform_range.scale_min; }
+			static inline auto get_range_extent(const acl_impl::qvvf_ranges& transform_range) { return transform_range.scale_extent; }
+			static inline VectorFormat8 get_vector_format(const quantization_context& context) { return context.settings.scale_format; }
+		};
+
+		template<typename adapter_type>
+		inline void quantize_variable_vector3f_track(quantization_context& context, uint32_t transform_index, const acl_impl::qvvf_ranges& transform_range)
+		{
+			using namespace acl_impl;
+			ACL_ASSERT(adapter_type::are_samples_normalized(transform_range), "Variable vector3f tracks must be normalized");
+
+			const uint8_t bit_rate = adapter_type::get_bit_rate(context, transform_index);
+			const uint32_t num_soa_entries = context.segment->num_soa_entries;
+
+			Vector4_32* samples_x;
+			Vector4_32* samples_y;
+			Vector4_32* samples_z;
+			adapter_type::get_mutable_samples(context, transform_index, samples_x, samples_y, samples_z);
+
+			if (is_constant_bit_rate(bit_rate))
+			{
+				// We can't use the values in the mutable track database because they have been normalized to the whole segment
+				// and we need them normalized to the clip only.
+
+				Vector4_32* raw_samples_x;
+				Vector4_32* raw_samples_y;
+				Vector4_32* raw_samples_z;
+				adapter_type::get_raw_samples(context, transform_index, raw_samples_x, raw_samples_y, raw_samples_z);
+
+				// Copy our raw original values
+				copy_vector3f_track(num_soa_entries, raw_samples_x, raw_samples_y, raw_samples_z, samples_x, samples_y, samples_z);
+
+				// Normalize to our clip range
+				normalize_vector3f_track(samples_x, samples_y, samples_z, num_soa_entries, adapter_type::get_range_min(transform_range), adapter_type::get_range_extent(transform_range));
+
+				// Quantize and pack our values into place on 16 bits per component
+				const StaticQuantizationScales<16> scales;
+
+				// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+				// TODO: Trivial AVX or ISPC conversion
+				for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+				{
+					pack_vector3_u48_soa(samples_x[entry_index], samples_y[entry_index], samples_z[entry_index], scales);
+
+					const uint32_t next_entry_index = entry_index + 1;
+					pack_vector3_u48_soa(samples_x[next_entry_index], samples_y[next_entry_index], samples_z[next_entry_index], scales);
+				}
+			}
+			else
+			{
+				if (is_raw_bit_rate(bit_rate))
+				{
+					Vector4_32* raw_samples_x;
+					Vector4_32* raw_samples_y;
+					Vector4_32* raw_samples_z;
+					adapter_type::get_raw_samples(context, transform_index, raw_samples_x, raw_samples_y, raw_samples_z);
+
+					// Copy our raw original values
+					copy_vector3f_track(num_soa_entries, raw_samples_x, raw_samples_y, raw_samples_z, samples_x, samples_y, samples_z);
+				}
+				else
+				{
+					const uint32_t num_bits_at_bit_rate = get_num_bits_at_bit_rate(bit_rate);
+					const QuantizationScales scales(num_bits_at_bit_rate);
+
+					// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+					// TODO: Trivial AVX or ISPC conversion
+					for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+					{
+						pack_vector3_uXX_soa(samples_x[entry_index], samples_y[entry_index], samples_z[entry_index], scales);
+
+						const uint32_t next_entry_index = entry_index + 1;
+						pack_vector3_uXX_soa(samples_x[next_entry_index], samples_y[next_entry_index], samples_z[next_entry_index], scales);
+					}
+				}
+			}
+		}
+
+		template<typename adapter_type>
+		inline void quantize_fixed_vector3f_track(quantization_context& context, uint32_t transform_index, const acl_impl::qvvf_ranges& transform_range)
+		{
+			using namespace acl_impl;
+			(void)transform_range;
+
+			const StaticQuantizationScales<16> scales16;
+			const QuantizationScales scales11(11);
+			const QuantizationScales scales10(10);
+
+			const uint32_t num_soa_entries = context.segment->num_soa_entries;
+
+			Vector4_32* samples_x;
+			Vector4_32* samples_y;
+			Vector4_32* samples_z;
+			adapter_type::get_mutable_samples(context, transform_index, samples_x, samples_y, samples_z);
+
+			const VectorFormat8 format = adapter_type::get_vector_format(context);
+			switch (format)
+			{
+			case VectorFormat8::Vector3_96:
+				// Nothing to do, mutable database already contains what we need
+				break;
+			case VectorFormat8::Vector3_48:
+				ACL_ASSERT(adapter_type::are_samples_normalized(transform_range), "Vector3_48 tracks must be normalized");
+
+				// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+				// TODO: Trivial AVX or ISPC conversion
+				for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+				{
+					pack_vector3_u48_soa(samples_x[entry_index], samples_y[entry_index], samples_z[entry_index], scales16);
+
+					const uint32_t next_entry_index = entry_index + 1;
+					pack_vector3_u48_soa(samples_x[next_entry_index], samples_y[next_entry_index], samples_z[next_entry_index], scales16);
+				}
+				break;
+			case VectorFormat8::Vector3_32:
+				ACL_ASSERT(adapter_type::are_samples_normalized(transform_range), "Vector3_32 tracks must be normalized");
+
+				// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+				// TODO: Trivial AVX or ISPC conversion
+				for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+				{
+					pack_vector3_u32_soa(samples_x[entry_index], samples_y[entry_index], samples_z[entry_index], scales11, scales11, scales10);
+
+					const uint32_t next_entry_index = entry_index + 1;
+					pack_vector3_u32_soa(samples_x[next_entry_index], samples_y[next_entry_index], samples_z[next_entry_index], scales11, scales11, scales10);
+				}
+				break;
+			case VectorFormat8::Vector3_Variable:
+			default:
+				ACL_ASSERT(false, "Invalid or unsupported vector format: %s", get_vector_format_name(format));
+				break;
+			}
+		}
+
 		inline void quantize_all_streams(quantization_context& context)
 		{
+			using namespace acl_impl;
 			ACL_ASSERT(context.is_valid(), "quantization_context isn't valid");
+
+			const Vector4_32 default_rotation = quat_identity_32();
+			const Vector4_32 default_translation = vector_zero_32();
+			const Vector4_32 default_scale = context.mutable_tracks_database.get_default_scale();
+			const uint32_t num_soa_entries = context.segment->num_soa_entries;
+
+			// Quantize to the mutable database in-place
 
 			for (uint32_t transform_index = 0; transform_index < context.num_transforms; ++transform_index)
 			{
-				const BoneBitRate& bone_bit_rate = context.bit_rate_per_bone[transform_index];
+				const qvvf_ranges& transform_range = context.mutable_tracks_database.get_range(transform_index);
 
-#if 0
-				//context.local_query.build(transform_index, bone_bit_rate);
-
-				for (uint32_t sample_index = 0; sample_index < context.num_samples; ++sample_index)
+				if (transform_range.is_rotation_default)
 				{
-					// The sample time is calculated from the full clip duration to be consistent with decompression
-					//const float sample_time = min(float(context.segment_sample_start_index + sample_index) / context.sample_rate, context.clip_duration);
+					Vector4_32* rotations_x;
+					Vector4_32* rotations_y;
+					Vector4_32* rotations_z;
+					Vector4_32* rotations_w;
+					context.mutable_tracks_database.get_rotations(*context.segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
 
-					//context.database.sample(context.local_query, sample_time, context.lossy_local_pose, context.num_transforms);
-
-					const Transform_32& transform = context.lossy_local_pose[transform_index];
-					context.mutable_tracks_database.set_rotation(transform.rotation, *context.segment, transform_index, sample_index);
-					context.mutable_tracks_database.set_translation(transform.translation, *context.segment, transform_index, sample_index);
-
-					if (context.has_scale)
-						context.mutable_tracks_database.set_scale(transform.scale, *context.segment, transform_index, sample_index);
+					set_vector4f_track(default_rotation, num_soa_entries, rotations_x, rotations_y, rotations_z, rotations_w);
 				}
-#endif
+				else if (transform_range.is_rotation_constant)
+				{
+					Vector4_32* rotations_x;
+					Vector4_32* rotations_y;
+					Vector4_32* rotations_z;
+					Vector4_32* rotations_w;
+					context.mutable_tracks_database.get_rotations(*context.segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
 
-				context.segment->bit_rates[transform_index] = bone_bit_rate;
+					const Vector4_32 rotation = context.raw_tracks_database.get_rotation(*context.segment, transform_index, 0);
+					set_vector4f_track(rotation, num_soa_entries, rotations_x, rotations_y, rotations_z, rotations_w);
+				}
+				else if (is_rotation_format_variable(context.settings.rotation_format))
+					quantize_variable_rotation_track(context, transform_index, transform_range);
+				else
+					quantize_fixed_rotation_track(context, transform_index, transform_range);
+
+				if (transform_range.is_translation_default)
+				{
+					Vector4_32* translations_x;
+					Vector4_32* translations_y;
+					Vector4_32* translations_z;
+					context.mutable_tracks_database.get_translations(*context.segment, transform_index, translations_x, translations_y, translations_z);
+
+					set_vector3f_track(default_translation, num_soa_entries, translations_x, translations_y, translations_z);
+				}
+				else if (transform_range.is_translation_constant)
+				{
+					Vector4_32* translations_x;
+					Vector4_32* translations_y;
+					Vector4_32* translations_z;
+					context.mutable_tracks_database.get_translations(*context.segment, transform_index, translations_x, translations_y, translations_z);
+
+					const Vector4_32 translation = context.raw_tracks_database.get_translation(*context.segment, transform_index, 0);
+					set_vector3f_track(translation, num_soa_entries, translations_x, translations_y, translations_z);
+				}
+				else if (is_vector_format_variable(context.settings.translation_format))
+					quantize_variable_vector3f_track<translation_track_adapter>(context, transform_index, transform_range);
+				else
+					quantize_fixed_vector3f_track<translation_track_adapter>(context, transform_index, transform_range);
+
+				if (context.has_scale)
+				{
+					if (transform_range.is_scale_default)
+					{
+						Vector4_32* scales_x;
+						Vector4_32* scales_y;
+						Vector4_32* scales_z;
+						context.mutable_tracks_database.get_scales(*context.segment, transform_index, scales_x, scales_y, scales_z);
+
+						set_vector3f_track(default_scale, num_soa_entries, scales_x, scales_y, scales_z);
+					}
+					else if (transform_range.is_scale_constant)
+					{
+						Vector4_32* scales_x;
+						Vector4_32* scales_y;
+						Vector4_32* scales_z;
+						context.mutable_tracks_database.get_scales(*context.segment, transform_index, scales_x, scales_y, scales_z);
+
+						const Vector4_32 scale = context.raw_tracks_database.get_scale(*context.segment, transform_index, 0);
+						set_vector3f_track(scale, num_soa_entries, scales_x, scales_y, scales_z);
+					}
+					else if (is_vector_format_variable(context.settings.translation_format))
+						quantize_variable_vector3f_track<scale_track_adapter>(context, transform_index, transform_range);
+					else
+						quantize_fixed_vector3f_track<scale_track_adapter>(context, transform_index, transform_range);
+				}
+
+				context.segment->bit_rates[transform_index] = context.bit_rate_per_bone[transform_index];
 			}
 		}
 

@@ -37,6 +37,36 @@ ACL_IMPL_FILE_PRAGMA_PUSH
 
 namespace acl
 {
+	namespace acl_impl
+	{
+		struct QuantizationScales
+		{
+			Vector4_32 max_value;
+			Vector4_32 inv_max_value;
+			uint32_t num_bits;
+
+			QuantizationScales(uint32_t num_bits_)
+			{
+				ACL_ASSERT(num_bits_ > 0, "Cannot decay with 0 bits");
+				ACL_ASSERT(num_bits_ < 31, "Attempting to decay on too many bits");
+
+				const float max_value_ = safe_to_float((1 << num_bits_) - 1);
+				max_value = vector_set(max_value_);
+				inv_max_value = vector_set(1.0f / max_value_);
+				num_bits = num_bits_;
+			}
+		};
+
+		template<uint32_t num_bits_>
+		struct StaticQuantizationScales : QuantizationScales
+		{
+			static_assert(num_bits_ > 0, "Cannot decay with 0 bits");
+			static_assert(num_bits_ < 31, "Attempting to decay on too many bits");
+
+			StaticQuantizationScales() : QuantizationScales(num_bits_) {}
+		};
+	}
+
 	inline void ACL_SIMD_CALL pack_vector4_128(Vector4_32Arg0 vector, uint8_t* out_vector_data)
 	{
 		vector_unaligned_write(vector, out_vector_data);
@@ -428,6 +458,45 @@ namespace acl
 		data[2] = safe_static_cast<uint16_t>(vector_z);
 	}
 
+	namespace acl_impl
+	{
+		inline void ACL_SIMD_CALL pack_vector3_u48_soa(Vector4_32& inputs_x, Vector4_32& inputs_y, Vector4_32& inputs_z, const StaticQuantizationScales<16>& scales)
+		{
+			const Vector4_32 packed_x = vector_symmetric_round(vector_mul(inputs_x, scales.max_value));
+			const Vector4_32 packed_y = vector_symmetric_round(vector_mul(inputs_y, scales.max_value));
+			const Vector4_32 packed_z = vector_symmetric_round(vector_mul(inputs_z, scales.max_value));
+
+			// TODO: Use vector4i coercion
+#if defined(ACL_SSE2_INTRINSICS)
+			inputs_x = _mm_castsi128_ps(_mm_cvtps_epi32(packed_x));
+			inputs_y = _mm_castsi128_ps(_mm_cvtps_epi32(packed_y));
+			inputs_z = _mm_castsi128_ps(_mm_cvtps_epi32(packed_z));
+#elif defined(ACL_NEON_INTRINSICS)
+			inputs_x = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_x));
+			inputs_y = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_y));
+			inputs_z = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_z));
+#else
+			uint32_t* outputs_x = reinterpret_cast<uint32_t*>(inputs_x);
+			outputs_x[0] = uint32_t(packed_x.x);
+			outputs_x[1] = uint32_t(packed_x.y);
+			outputs_x[2] = uint32_t(packed_x.z);
+			outputs_x[3] = uint32_t(packed_x.w);
+
+			uint32_t* outputs_y = reinterpret_cast<uint32_t*>(inputs_y);
+			outputs_y[0] = uint32_t(packed_y.x);
+			outputs_y[1] = uint32_t(packed_y.y);
+			outputs_y[2] = uint32_t(packed_y.z);
+			outputs_y[3] = uint32_t(packed_y.w);
+
+			uint32_t* outputs_z = reinterpret_cast<uint32_t*>(inputs_z);
+			outputs_z[0] = uint32_t(packed_z.x);
+			outputs_z[1] = uint32_t(packed_z.y);
+			outputs_z[2] = uint32_t(packed_z.z);
+			outputs_z[3] = uint32_t(packed_z.w);
+#endif
+		}
+	}
+
 	// Assumes the 'out_vector_data' is padded in order to write up to 16 bytes to it
 	inline void ACL_SIMD_CALL pack_vector3_s48_unsafe(Vector4_32Arg0 vector, uint8_t* out_vector_data)
 	{
@@ -439,6 +508,50 @@ namespace acl
 		data[0] = safe_static_cast<uint16_t>(vector_x);
 		data[1] = safe_static_cast<uint16_t>(vector_y);
 		data[2] = safe_static_cast<uint16_t>(vector_z);
+	}
+
+	namespace acl_impl
+	{
+		inline void ACL_SIMD_CALL pack_vector3_s48_soa(Vector4_32& inputs_x, Vector4_32& inputs_y, Vector4_32& inputs_z, const StaticQuantizationScales<16>& scales)
+		{
+			const Vector4_32 half = vector_set(0.5f);
+			const Vector4_32 unsigned_inputs_x = vector_mul_add(inputs_x, half, half);
+			const Vector4_32 unsigned_inputs_y = vector_mul_add(inputs_y, half, half);
+			const Vector4_32 unsigned_inputs_z = vector_mul_add(inputs_z, half, half);
+
+			const Vector4_32 packed_x = vector_symmetric_round(vector_mul(unsigned_inputs_x, scales.max_value));
+			const Vector4_32 packed_y = vector_symmetric_round(vector_mul(unsigned_inputs_y, scales.max_value));
+			const Vector4_32 packed_z = vector_symmetric_round(vector_mul(unsigned_inputs_z, scales.max_value));
+
+			// TODO: Use vector4i coercion
+#if defined(ACL_SSE2_INTRINSICS)
+			inputs_x = _mm_castsi128_ps(_mm_cvtps_epi32(packed_x));
+			inputs_y = _mm_castsi128_ps(_mm_cvtps_epi32(packed_y));
+			inputs_z = _mm_castsi128_ps(_mm_cvtps_epi32(packed_z));
+#elif defined(ACL_NEON_INTRINSICS)
+			inputs_x = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_x));
+			inputs_y = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_y));
+			inputs_z = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_z));
+#else
+			uint32_t* outputs_x = reinterpret_cast<uint32_t*>(inputs_x);
+			outputs_x[0] = uint32_t(packed_x.x);
+			outputs_x[1] = uint32_t(packed_x.y);
+			outputs_x[2] = uint32_t(packed_x.z);
+			outputs_x[3] = uint32_t(packed_x.w);
+
+			uint32_t* outputs_y = reinterpret_cast<uint32_t*>(inputs_y);
+			outputs_y[0] = uint32_t(packed_y.x);
+			outputs_y[1] = uint32_t(packed_y.y);
+			outputs_y[2] = uint32_t(packed_y.z);
+			outputs_y[3] = uint32_t(packed_y.w);
+
+			uint32_t* outputs_z = reinterpret_cast<uint32_t*>(inputs_z);
+			outputs_z[0] = uint32_t(packed_z.x);
+			outputs_z[1] = uint32_t(packed_z.y);
+			outputs_z[2] = uint32_t(packed_z.z);
+			outputs_z[3] = uint32_t(packed_z.w);
+#endif
+		}
 	}
 
 	ACL_DEPRECATED("Use pack_vector3_u48_unsafe and pack_vector3_s48_unsafe instead, to be removed in v2.0")
@@ -506,7 +619,7 @@ namespace acl
 	{
 		ACL_ASSERT(vector_all_greater_equal(input, vector_zero_32()) && vector_all_less_equal(input, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f", vector_get_x(input), vector_get_y(input), vector_get_z(input));
 
-		const float max_value = safe_to_float((1 << 16) - 1);
+		const float max_value = float((1 << 16) - 1);
 		const float inv_max_value = 1.0f / max_value;
 
 		const Vector4_32 packed = vector_symmetric_round(vector_mul(input, max_value));
@@ -517,7 +630,7 @@ namespace acl
 	inline Vector4_32 ACL_SIMD_CALL decay_vector3_s48(Vector4_32Arg0 input)
 	{
 		const Vector4_32 half = vector_set(0.5f);
-		const Vector4_32 unsigned_input = vector_add(vector_mul(input, half), half);
+		const Vector4_32 unsigned_input = vector_mul_add(input, half, half);
 
 		ACL_ASSERT(vector_all_greater_equal(unsigned_input, vector_zero_32()) && vector_all_less_equal(unsigned_input, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f", vector_get_x(unsigned_input), vector_get_y(unsigned_input), vector_get_z(unsigned_input));
 
@@ -526,7 +639,7 @@ namespace acl
 
 		const Vector4_32 packed = vector_symmetric_round(vector_mul(unsigned_input, max_value));
 		const Vector4_32 decayed = vector_mul(packed, inv_max_value);
-		return vector_sub(vector_mul(decayed, vector_set(2.0f)), vector_set(1.0f));
+		return vector_neg_mul_sub(decayed, vector_set(-2.0f), vector_set(1.0f));
 	}
 
 	inline void ACL_SIMD_CALL pack_vector3_32(Vector4_32Arg0 vector, uint8_t XBits, uint8_t YBits, uint8_t ZBits, bool is_unsigned, uint8_t* out_vector_data)
@@ -543,6 +656,90 @@ namespace acl
 		uint16_t* data = safe_ptr_cast<uint16_t>(out_vector_data);
 		data[0] = safe_static_cast<uint16_t>(vector_u32 >> 16);
 		data[1] = safe_static_cast<uint16_t>(vector_u32 & 0xFFFF);
+	}
+
+	namespace acl_impl
+	{
+		inline void ACL_SIMD_CALL pack_vector3_u32_soa(Vector4_32& inputs_x, Vector4_32& inputs_y, Vector4_32& inputs_z, const QuantizationScales& scales_x, const QuantizationScales& scales_y, const QuantizationScales& scales_z)
+		{
+			ACL_ASSERT(scales_x.num_bits + scales_y.num_bits + scales_z.num_bits < 32, "Cannot pack on more than 32 bits");
+
+			const Vector4_32 packed_x = vector_symmetric_round(vector_mul(inputs_x, scales_x.max_value));
+			const Vector4_32 packed_y = vector_symmetric_round(vector_mul(inputs_y, scales_y.max_value));
+			const Vector4_32 packed_z = vector_symmetric_round(vector_mul(inputs_z, scales_z.max_value));
+
+			// TODO: Use vector4i coercion
+#if defined(ACL_SSE2_INTRINSICS)
+			inputs_x = _mm_castsi128_ps(_mm_cvtps_epi32(packed_x));
+			inputs_y = _mm_castsi128_ps(_mm_cvtps_epi32(packed_y));
+			inputs_z = _mm_castsi128_ps(_mm_cvtps_epi32(packed_z));
+#elif defined(ACL_NEON_INTRINSICS)
+			inputs_x = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_x));
+			inputs_y = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_y));
+			inputs_z = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_z));
+#else
+			uint32_t* outputs_x = reinterpret_cast<uint32_t*>(inputs_x);
+			outputs_x[0] = uint32_t(packed_x.x);
+			outputs_x[1] = uint32_t(packed_x.y);
+			outputs_x[2] = uint32_t(packed_x.z);
+			outputs_x[3] = uint32_t(packed_x.w);
+
+			uint32_t* outputs_y = reinterpret_cast<uint32_t*>(inputs_y);
+			outputs_y[0] = uint32_t(packed_y.x);
+			outputs_y[1] = uint32_t(packed_y.y);
+			outputs_y[2] = uint32_t(packed_y.z);
+			outputs_y[3] = uint32_t(packed_y.w);
+
+			uint32_t* outputs_z = reinterpret_cast<uint32_t*>(inputs_z);
+			outputs_z[0] = uint32_t(packed_z.x);
+			outputs_z[1] = uint32_t(packed_z.y);
+			outputs_z[2] = uint32_t(packed_z.z);
+			outputs_z[3] = uint32_t(packed_z.w);
+#endif
+		}
+
+		inline void ACL_SIMD_CALL pack_vector3_s32_soa(Vector4_32& inputs_x, Vector4_32& inputs_y, Vector4_32& inputs_z, const QuantizationScales& scales_x, const QuantizationScales& scales_y, const QuantizationScales& scales_z)
+		{
+			ACL_ASSERT(scales_x.num_bits + scales_y.num_bits + scales_z.num_bits < 32, "Cannot pack on more than 32 bits");
+
+			const Vector4_32 half = vector_set(0.5f);
+			const Vector4_32 unsigned_inputs_x = vector_mul_add(inputs_x, half, half);
+			const Vector4_32 unsigned_inputs_y = vector_mul_add(inputs_y, half, half);
+			const Vector4_32 unsigned_inputs_z = vector_mul_add(inputs_z, half, half);
+
+			const Vector4_32 packed_x = vector_symmetric_round(vector_mul(unsigned_inputs_x, scales_x.max_value));
+			const Vector4_32 packed_y = vector_symmetric_round(vector_mul(unsigned_inputs_y, scales_y.max_value));
+			const Vector4_32 packed_z = vector_symmetric_round(vector_mul(unsigned_inputs_z, scales_z.max_value));
+
+			// TODO: Use vector4i coercion
+#if defined(ACL_SSE2_INTRINSICS)
+			inputs_x = _mm_castsi128_ps(_mm_cvtps_epi32(packed_x));
+			inputs_y = _mm_castsi128_ps(_mm_cvtps_epi32(packed_y));
+			inputs_z = _mm_castsi128_ps(_mm_cvtps_epi32(packed_z));
+#elif defined(ACL_NEON_INTRINSICS)
+			inputs_x = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_x));
+			inputs_y = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_y));
+			inputs_z = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_z));
+#else
+			uint32_t* outputs_x = reinterpret_cast<uint32_t*>(inputs_x);
+			outputs_x[0] = uint32_t(packed_x.x);
+			outputs_x[1] = uint32_t(packed_x.y);
+			outputs_x[2] = uint32_t(packed_x.z);
+			outputs_x[3] = uint32_t(packed_x.w);
+
+			uint32_t* outputs_y = reinterpret_cast<uint32_t*>(inputs_y);
+			outputs_y[0] = uint32_t(packed_y.x);
+			outputs_y[1] = uint32_t(packed_y.y);
+			outputs_y[2] = uint32_t(packed_y.z);
+			outputs_y[3] = uint32_t(packed_y.w);
+
+			uint32_t* outputs_z = reinterpret_cast<uint32_t*>(inputs_z);
+			outputs_z[0] = uint32_t(packed_z.x);
+			outputs_z[1] = uint32_t(packed_z.y);
+			outputs_z[2] = uint32_t(packed_z.z);
+			outputs_z[3] = uint32_t(packed_z.w);
+#endif
+		}
 	}
 
 	inline Vector4_32 ACL_SIMD_CALL unpack_vector3_32(uint8_t XBits, uint8_t YBits, uint8_t ZBits, bool is_unsigned, const uint8_t* vector_data)
@@ -684,6 +881,45 @@ namespace acl
 		unaligned_write(vector_u64, out_vector_data);
 	}
 
+	namespace acl_impl
+	{
+		inline void ACL_SIMD_CALL pack_vector3_uXX_soa(Vector4_32& inputs_x, Vector4_32& inputs_y, Vector4_32& inputs_z, const QuantizationScales& scales)
+		{
+			const Vector4_32 packed_x = vector_symmetric_round(vector_mul(inputs_x, scales.max_value));
+			const Vector4_32 packed_y = vector_symmetric_round(vector_mul(inputs_y, scales.max_value));
+			const Vector4_32 packed_z = vector_symmetric_round(vector_mul(inputs_z, scales.max_value));
+
+			// TODO: Use vector4i coercion
+#if defined(ACL_SSE2_INTRINSICS)
+			inputs_x = _mm_castsi128_ps(_mm_cvtps_epi32(packed_x));
+			inputs_y = _mm_castsi128_ps(_mm_cvtps_epi32(packed_y));
+			inputs_z = _mm_castsi128_ps(_mm_cvtps_epi32(packed_z));
+#elif defined(ACL_NEON_INTRINSICS)
+			inputs_x = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_x));
+			inputs_y = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_y));
+			inputs_z = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_z));
+#else
+			uint32_t* outputs_x = reinterpret_cast<uint32_t*>(inputs_x);
+			outputs_x[0] = uint32_t(packed_x.x);
+			outputs_x[1] = uint32_t(packed_x.y);
+			outputs_x[2] = uint32_t(packed_x.z);
+			outputs_x[3] = uint32_t(packed_x.w);
+
+			uint32_t* outputs_y = reinterpret_cast<uint32_t*>(inputs_y);
+			outputs_y[0] = uint32_t(packed_y.x);
+			outputs_y[1] = uint32_t(packed_y.y);
+			outputs_y[2] = uint32_t(packed_y.z);
+			outputs_y[3] = uint32_t(packed_y.w);
+
+			uint32_t* outputs_z = reinterpret_cast<uint32_t*>(inputs_z);
+			outputs_z[0] = uint32_t(packed_z.x);
+			outputs_z[1] = uint32_t(packed_z.y);
+			outputs_z[2] = uint32_t(packed_z.z);
+			outputs_z[3] = uint32_t(packed_z.w);
+#endif
+		}
+	}
+
 	// Packs data in big-endian order and assumes the 'out_vector_data' is padded in order to write up to 16 bytes to it
 	inline void ACL_SIMD_CALL pack_vector4_uXX_unsafe(Vector4_32Arg0 vector, uint8_t num_bits, uint8_t* out_vector_data)
 	{
@@ -717,6 +953,50 @@ namespace acl
 		vector_u64 = byte_swap(vector_u64);
 
 		unaligned_write(vector_u64, out_vector_data);
+	}
+
+	namespace acl_impl
+	{
+		inline void ACL_SIMD_CALL pack_vector3_sXX_soa(Vector4_32& inputs_x, Vector4_32& inputs_y, Vector4_32& inputs_z, const QuantizationScales& scales)
+		{
+			const Vector4_32 half = vector_set(0.5f);
+			const Vector4_32 unsigned_inputs_x = vector_mul_add(inputs_x, half, half);
+			const Vector4_32 unsigned_inputs_y = vector_mul_add(inputs_y, half, half);
+			const Vector4_32 unsigned_inputs_z = vector_mul_add(inputs_z, half, half);
+
+			const Vector4_32 packed_x = vector_symmetric_round(vector_mul(unsigned_inputs_x, scales.max_value));
+			const Vector4_32 packed_y = vector_symmetric_round(vector_mul(unsigned_inputs_y, scales.max_value));
+			const Vector4_32 packed_z = vector_symmetric_round(vector_mul(unsigned_inputs_z, scales.max_value));
+
+			// TODO: Use vector4i coercion
+#if defined(ACL_SSE2_INTRINSICS)
+			inputs_x = _mm_castsi128_ps(_mm_cvtps_epi32(packed_x));
+			inputs_y = _mm_castsi128_ps(_mm_cvtps_epi32(packed_y));
+			inputs_z = _mm_castsi128_ps(_mm_cvtps_epi32(packed_z));
+#elif defined(ACL_NEON_INTRINSICS)
+			inputs_x = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_x));
+			inputs_y = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_y));
+			inputs_z = vreinterpretq_f32_u32(vcvtq_u32_f32(packed_z));
+#else
+			uint32_t* outputs_x = reinterpret_cast<uint32_t*>(inputs_x);
+			outputs_x[0] = uint32_t(packed_x.x);
+			outputs_x[1] = uint32_t(packed_x.y);
+			outputs_x[2] = uint32_t(packed_x.z);
+			outputs_x[3] = uint32_t(packed_x.w);
+
+			uint32_t* outputs_y = reinterpret_cast<uint32_t*>(inputs_y);
+			outputs_y[0] = uint32_t(packed_y.x);
+			outputs_y[1] = uint32_t(packed_y.y);
+			outputs_y[2] = uint32_t(packed_y.z);
+			outputs_y[3] = uint32_t(packed_y.w);
+
+			uint32_t* outputs_z = reinterpret_cast<uint32_t*>(inputs_z);
+			outputs_z[0] = uint32_t(packed_z.x);
+			outputs_z[1] = uint32_t(packed_z.y);
+			outputs_z[2] = uint32_t(packed_z.z);
+			outputs_z[3] = uint32_t(packed_z.w);
+#endif
+		}
 	}
 
 	// Assumes the 'out_vector_data' is padded in order to write up to 8 bytes to it

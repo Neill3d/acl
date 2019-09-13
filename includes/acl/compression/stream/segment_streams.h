@@ -197,6 +197,7 @@ namespace acl
 				segment.bit_rates = allocate_type_array<BoneBitRate>(allocator, num_transforms);
 
 				segment.index = 0;
+				segment.num_transforms = num_transforms;
 
 				segment.start_offset = 0;
 				segment.num_samples_per_track = num_samples_per_track;
@@ -278,6 +279,7 @@ namespace acl
 				segment.bit_rates = allocate_type_array<BoneBitRate>(allocator, num_transforms);
 
 				segment.index = segment_index;
+				segment.num_transforms = num_transforms;
 
 				segment.start_offset = start_offset;
 				segment.num_samples_per_track = num_samples_in_segment;

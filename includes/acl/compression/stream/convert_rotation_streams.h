@@ -115,6 +115,20 @@ namespace acl
 			rotations_w = vector_blend(w_positive_mask, rotations_w, vector_neg(rotations_w));
 		}
 
+		inline void convert_drop_w_track(Vector4_32* inputs_x, Vector4_32* inputs_y, Vector4_32* inputs_z, Vector4_32* inputs_w, uint32_t num_soa_entries)
+		{
+			// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
+			// TODO: Trivial AVX or ISPC conversion
+			for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
+			{
+				// Drop W, we just ensure it is positive and write it back, the W component can be ignored and trivially reconstructed afterwards
+				quat_ensure_positive_w_soa(inputs_x[entry_index], inputs_y[entry_index], inputs_z[entry_index], inputs_w[entry_index]);
+
+				const uint32_t next_entry_index = entry_index + 1;
+				quat_ensure_positive_w_soa(inputs_x[next_entry_index], inputs_y[next_entry_index], inputs_z[next_entry_index], inputs_w[next_entry_index]);
+			}
+		}
+
 		inline void convert_rotations(track_database& database, const segment_context& segment, RotationFormat8 rotation_format)
 		{
 			// We convert our rotations in place. We assume that the original format is RotationFormat8::Quat_128 stored as Quat_32
@@ -134,16 +148,7 @@ namespace acl
 				Vector4_32* rotations_w;
 				database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
 
-				// Process two entries at a time to allow the compiler to re-order things to hide instruction latency
-				// TODO: Trivial AVX or ISPC conversion
-				for (uint32_t entry_index = 0; entry_index < num_soa_entries; entry_index += 2)
-				{
-					// Drop W, we just ensure it is positive and write it back, the W component can be ignored and trivially reconstructed afterwards
-					quat_ensure_positive_w_soa(rotations_x[entry_index], rotations_y[entry_index], rotations_z[entry_index], rotations_w[entry_index]);
-
-					const uint32_t next_entry_index = entry_index + 1;
-					quat_ensure_positive_w_soa(rotations_x[next_entry_index], rotations_y[next_entry_index], rotations_z[next_entry_index], rotations_w[next_entry_index]);
-				}
+				convert_drop_w_track(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries);
 			}
 
 			database.set_rotation_format(rotation_format);

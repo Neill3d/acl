@@ -615,15 +615,6 @@ namespace acl
 			for (uint32_t transform_index = 0; transform_index < num_transforms; ++transform_index)
 			{
 				qvvf_ranges& segment_range = segment.ranges[transform_index];
-				segment_range.is_rotation_constant = false;
-				segment_range.is_rotation_default = false;
-				segment_range.is_translation_constant = false;
-				segment_range.is_translation_default = false;
-				segment_range.is_scale_constant = false;
-				segment_range.is_scale_default = false;
-				segment_range.are_rotations_normalized = false;
-				segment_range.are_translations_normalized = false;
-				segment_range.are_scales_normalized = false;
 
 				{
 					Vector4_32* rotations_x;
@@ -851,7 +842,7 @@ namespace acl
 			{
 				qvvf_ranges& transform_range = database.get_range(transform_index);
 
-				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Rotations))
+				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Rotations) && transform_range.is_rotation_animated())
 				{
 					Vector4_32* rotations_x;
 					Vector4_32* rotations_y;
@@ -864,7 +855,7 @@ namespace acl
 					transform_range.are_rotations_normalized = true;
 				}
 
-				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Translations))
+				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Translations) && transform_range.is_translation_animated())
 				{
 					Vector4_32* translations_x;
 					Vector4_32* translations_y;
@@ -876,7 +867,7 @@ namespace acl
 					transform_range.are_translations_normalized = true;
 				}
 
-				if (has_scale && are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Scales))
+				if (has_scale && are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Scales) && transform_range.is_scale_animated())
 				{
 					Vector4_32* scales_x;
 					Vector4_32* scales_y;
@@ -899,7 +890,7 @@ namespace acl
 			{
 				qvvf_ranges& segment_range = segment.ranges[transform_index];
 
-				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Rotations))
+				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Rotations) && segment_range.is_rotation_animated())
 				{
 					Vector4_32* rotations_x;
 					Vector4_32* rotations_y;
@@ -912,7 +903,7 @@ namespace acl
 					segment_range.are_rotations_normalized = true;
 				}
 
-				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Translations))
+				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Translations) && segment_range.is_translation_animated())
 				{
 					Vector4_32* translations_x;
 					Vector4_32* translations_y;
@@ -924,7 +915,7 @@ namespace acl
 					segment_range.are_translations_normalized = true;
 				}
 
-				if (has_scale && are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Scales))
+				if (has_scale && are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Scales) && segment_range.is_scale_animated())
 				{
 					Vector4_32* scales_x;
 					Vector4_32* scales_y;

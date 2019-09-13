@@ -119,7 +119,7 @@ namespace acl
 			{
 				segment_context& segment = segments[segment_index];
 
-				// TODO: Should we also convert the raw database?
+				// TODO: Should we also convert the raw database? It seems to make sense because we always convert it when quantizing at the end anyway, does it matter?
 				convert_rotations(mutable_track_database, segment, settings.rotation_format);
 
 				// Extract segment ranges, we'll merge them after the loop
@@ -138,6 +138,8 @@ namespace acl
 			for (uint32_t segment_index = 0; segment_index < num_segments; ++segment_index)
 			{
 				segment_context& segment = segments[segment_index];
+
+				detect_segment_constant_tracks(mutable_track_database, segment);
 
 				if (settings.range_reduction != RangeReductionFlags8::None)
 					normalize_with_database_ranges(mutable_track_database, segment, settings.range_reduction);
