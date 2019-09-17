@@ -706,15 +706,6 @@ namespace acl
 				}
 
 				qvvf_ranges& clip_transform_range = database.get_range(transform_index);
-				clip_transform_range.is_rotation_constant = false;
-				clip_transform_range.is_rotation_default = false;
-				clip_transform_range.is_translation_constant = false;
-				clip_transform_range.is_translation_default = false;
-				clip_transform_range.is_scale_constant = false;
-				clip_transform_range.is_scale_default = false;
-				clip_transform_range.are_rotations_normalized = false;
-				clip_transform_range.are_translations_normalized = false;
-				clip_transform_range.are_scales_normalized = false;
 
 				const Vector4_32 rotation_range_extent = vector_sub(rotation_range_max, rotation_range_min);
 				vector_unaligned_write(rotation_range_min, clip_transform_range.rotation_min);

@@ -220,20 +220,22 @@ namespace acl
 					// Copy the samples into SOA layout
 					for (uint32_t sample_index = 0; sample_index < segment.num_samples_per_track; ++sample_index)
 					{
-						const Quat_32 rotation = quat_normalize(quat_cast(transform.rotation_track.get_sample(sample_index)));
+						const uint32_t clip_sample_index = segment.start_offset + sample_index;
+
+						const Quat_32 rotation = quat_normalize(quat_cast(transform.rotation_track.get_sample(clip_sample_index)));
 						rotation_track_x[sample_index] = quat_get_x(rotation);
 						rotation_track_y[sample_index] = quat_get_y(rotation);
 						rotation_track_z[sample_index] = quat_get_z(rotation);
 						rotation_track_w[sample_index] = quat_get_w(rotation);
 
-						const Vector4_32 translation = vector_cast(transform.translation_track.get_sample(sample_index));
+						const Vector4_32 translation = vector_cast(transform.translation_track.get_sample(clip_sample_index));
 						translation_track_x[sample_index] = vector_get_x(translation);
 						translation_track_y[sample_index] = vector_get_y(translation);
 						translation_track_z[sample_index] = vector_get_z(translation);
 
 						if (has_scale_)
 						{
-							const Vector4_32 scale = vector_cast(transform.scale_track.get_sample(sample_index));
+							const Vector4_32 scale = vector_cast(transform.scale_track.get_sample(clip_sample_index));
 							scale_track_x[sample_index] = vector_get_x(scale);
 							scale_track_y[sample_index] = vector_get_y(scale);
 							scale_track_z[sample_index] = vector_get_z(scale);
@@ -243,7 +245,7 @@ namespace acl
 					// Add padding by repeating the last sample
 					for (uint32_t sample_index = segment.num_samples_per_track; sample_index < num_simd_samples_per_track; ++sample_index)
 					{
-						// TODO: write the default value to a float array to avoid potentially shuffling everytime
+						// TODO: write the default value to a float array to avoid potentially shuffling every time
 						rotation_track_x[sample_index] = rotation_track_x[segment.num_samples_per_track - 1];
 						rotation_track_y[sample_index] = rotation_track_y[segment.num_samples_per_track - 1];
 						rotation_track_z[sample_index] = rotation_track_z[segment.num_samples_per_track - 1];

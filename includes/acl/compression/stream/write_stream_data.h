@@ -336,6 +336,7 @@ namespace acl
 				const uint32_t transform_index = output_transform_mapping[output_index];
 				const qvvf_ranges& transform_range = mutable_database.get_range(transform_index);
 
+				// todo: can be fixed size for rotation
 				if (!transform_range.is_rotation_default && transform_range.is_rotation_constant)
 				{
 					if (out_constant_values != nullptr)

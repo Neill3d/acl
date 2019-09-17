@@ -1597,6 +1597,9 @@ namespace acl
 
 					const Vector4_32 rotation = context.raw_tracks_database.get_rotation(context.first_segment, transform_index, 0);
 					set_vector4f_track(rotation, num_soa_entries, rotations_x, rotations_y, rotations_z, rotations_w);
+
+					// We might need to quantize it
+					quantize_fixed_rotation_track(context, transform_index, transform_range);
 				}
 				else if (is_rotation_format_variable(context.settings.rotation_format))
 					quantize_variable_rotation_track(context, transform_index, transform_range);
@@ -2045,6 +2048,10 @@ namespace acl
 	{
 		inline void quantize_tracks(acl::impl::quantization_context& context, segment_context& segment, const CompressionSettings& settings)
 		{
+#if ACL_IMPL_DEBUG_VARIABLE_QUANTIZATION
+			printf("Quantizing segment %u...\n", segment.index);
+#endif
+
 			context.set_segment(segment);
 
 			const bool is_rotation_variable = is_rotation_format_variable(settings.rotation_format);
@@ -2054,6 +2061,8 @@ namespace acl
 
 			if (is_any_variable)
 				impl::find_optimal_bit_rates(context);
+			else
+				std::fill(context.bit_rate_per_bone, context.bit_rate_per_bone + context.num_transforms, BoneBitRate{ k_invalid_bit_rate, k_invalid_bit_rate, k_invalid_bit_rate });
 
 			// Quantize our streams now that we found the optimal bit rates
 			impl::quantize_all_streams(context);

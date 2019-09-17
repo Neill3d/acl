@@ -598,8 +598,8 @@ namespace acl
 	// Assumes the 'vector_data' is padded in order to load up to 16 bytes from it
 	inline Vector4_32 ACL_SIMD_CALL unpack_vector3_s48_unsafe(const uint8_t* vector_data)
 	{
-		Vector4_32 unsigned_value = unpack_vector3_u48_unsafe(vector_data);
-		return vector_sub(vector_mul(unsigned_value, 2.0f), vector_set(1.0f));
+		const Vector4_32 unsigned_value = unpack_vector3_u48_unsafe(vector_data);
+		return vector_neg_mul_sub(unsigned_value, -2.0f, vector_set(-1.0f));
 	}
 
 	ACL_DEPRECATED("Use unpack_vector3_u48_unsafe and unpack_vector3_s48_unsafe instead, to be removed in v2.0")
@@ -639,7 +639,7 @@ namespace acl
 
 		const Vector4_32 packed = vector_symmetric_round(vector_mul(unsigned_input, max_value));
 		const Vector4_32 decayed = vector_mul(packed, inv_max_value);
-		return vector_neg_mul_sub(decayed, vector_set(-2.0f), vector_set(1.0f));
+		return vector_neg_mul_sub(decayed, -2.0f, vector_set(-1.0f));
 	}
 
 	inline void ACL_SIMD_CALL pack_vector3_32(Vector4_32Arg0 vector, uint8_t XBits, uint8_t YBits, uint8_t ZBits, bool is_unsigned, uint8_t* out_vector_data)
@@ -837,8 +837,8 @@ namespace acl
 	// Assumes the 'vector_data' is padded in order to load up to 16 bytes from it
 	inline Vector4_32 ACL_SIMD_CALL unpack_vector3_s24_unsafe(const uint8_t* vector_data)
 	{
-		Vector4_32 unsigned_value = unpack_vector3_u24_unsafe(vector_data);
-		return vector_sub(vector_mul(unsigned_value, 2.0f), vector_set(1.0f));
+		const Vector4_32 unsigned_value = unpack_vector3_u24_unsafe(vector_data);
+		return vector_neg_mul_sub(unsigned_value, -2.0f, vector_set(-1.0f));
 	}
 
 	ACL_DEPRECATED("Use unpack_vector3_u24_unsafe and unpack_vector3_s24_unsafe instead, to be removed in v2.0")
@@ -1036,7 +1036,7 @@ namespace acl
 
 		const Vector4_32 packed = vector_symmetric_round(vector_mul(unsigned_input, max_value));
 		const Vector4_32 decayed = vector_mul(packed, inv_max_value);
-		return vector_sub(vector_mul(decayed, vector_set(2.0f)), vector_set(1.0f));
+		return vector_neg_mul_sub(decayed, -2.0f, vector_set(-1.0f));
 	}
 
 	// Assumes the 'vector_data' is in big-endian order and padded in order to load up to 16 bytes from it
@@ -1379,8 +1379,8 @@ namespace acl
 	{
 		ACL_ASSERT(num_bits * 3 <= 64, "Attempting to read too many bits");
 
-		Vector4_32 unsigned_value = unpack_vector3_uXX_unsafe(num_bits, vector_data, bit_offset);
-		return vector_sub(vector_mul(unsigned_value, 2.0f), vector_set(1.0f));
+		const Vector4_32 unsigned_value = unpack_vector3_uXX_unsafe(num_bits, vector_data, bit_offset);
+		return vector_neg_mul_sub(unsigned_value, -2.0f, vector_set(-1.0f));
 	}
 
 	// Assumes the 'vector_data' is in big-endian order and padded in order to load up to 8 bytes from it
