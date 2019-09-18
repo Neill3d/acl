@@ -617,7 +617,7 @@ namespace acl
 
 	inline Vector4_32 ACL_SIMD_CALL decay_vector3_u48(Vector4_32Arg0 input)
 	{
-		ACL_ASSERT(vector_all_greater_equal(input, vector_zero_32()) && vector_all_less_equal(input, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f", vector_get_x(input), vector_get_y(input), vector_get_z(input));
+		ACL_ASSERT(vector_all_greater_equal3(input, vector_zero_32()) && vector_all_less_equal(input, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f", vector_get_x(input), vector_get_y(input), vector_get_z(input));
 
 		const float max_value = float((1 << 16) - 1);
 		const float inv_max_value = 1.0f / max_value;
@@ -632,7 +632,7 @@ namespace acl
 		const Vector4_32 half = vector_set(0.5f);
 		const Vector4_32 unsigned_input = vector_mul_add(input, half, half);
 
-		ACL_ASSERT(vector_all_greater_equal(unsigned_input, vector_zero_32()) && vector_all_less_equal(unsigned_input, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f", vector_get_x(unsigned_input), vector_get_y(unsigned_input), vector_get_z(unsigned_input));
+		ACL_ASSERT(vector_all_greater_equal3(unsigned_input, vector_zero_32()) && vector_all_less_equal(unsigned_input, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f", vector_get_x(unsigned_input), vector_get_y(unsigned_input), vector_get_z(unsigned_input));
 
 		const float max_value = safe_to_float((1 << 16) - 1);
 		const float inv_max_value = 1.0f / max_value;

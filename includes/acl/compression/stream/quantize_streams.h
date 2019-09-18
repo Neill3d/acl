@@ -1079,7 +1079,7 @@ namespace acl
 
 			for (uint32_t transform_index = 0; transform_index < context.num_transforms; ++transform_index)
 			{
-				const acl_impl::qvvf_ranges& transform_range = context.mutable_tracks_database.get_range(transform_index);
+				const acl_impl::qvvf_ranges& transform_range = context.segment->ranges[transform_index];
 				BoneBitRate& bone_bit_rate = out_bit_rate_per_bone[transform_index];
 
 				const bool rotation_supports_constant_tracks = transform_range.are_rotations_normalized;
@@ -1337,6 +1337,7 @@ namespace acl
 			{
 			case RotationFormat8::Quat_128:
 			case RotationFormat8::QuatDropW_96:
+			case RotationFormat8::QuatDropW_Variable:
 				// Nothing to do, mutable database already contains what we need
 				break;
 			case RotationFormat8::QuatDropW_48:
@@ -1391,7 +1392,6 @@ namespace acl
 					}
 				}
 				break;
-			case RotationFormat8::QuatDropW_Variable:
 			default:
 				ACL_ASSERT(false, "Invalid or unsupported rotation format: %s", get_rotation_format_name(context.settings.rotation_format));
 				break;
@@ -1595,7 +1595,8 @@ namespace acl
 					Vector4_32* rotations_w;
 					context.mutable_tracks_database.get_rotations(*context.segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
 
-					const Vector4_32 rotation = context.raw_tracks_database.get_rotation(context.first_segment, transform_index, 0);
+					Vector4_32 rotation = context.raw_tracks_database.get_rotation(context.first_segment, transform_index, 0);
+					rotation = convert_rotation(rotation, context.raw_tracks_database.get_rotation_format(), context.mutable_tracks_database.get_rotation_format());
 					set_vector4f_track(rotation, num_soa_entries, rotations_x, rotations_y, rotations_z, rotations_w);
 
 					// We might need to quantize it

@@ -324,8 +324,12 @@ namespace acl
 		{
 			(void)num_segments;
 
+			RotationFormat8 rotation_format = mutable_database.get_rotation_format();
+			if (rotation_format == RotationFormat8::QuatDropW_Variable)
+				rotation_format = RotationFormat8::QuatDropW_96;
+
 			const bool has_scale = mutable_database.has_scale();
-			const uint32_t num_rotation_sample_floats = mutable_database.get_rotation_format() == RotationFormat8::Quat_128 ? 4 : 3;
+			const uint32_t packed_rotation_size = get_packed_rotation_size(rotation_format);
 			const segment_context& segment = segments[0];	// Only use the first segment, it contains the necessary information
 
 			uint8_t* output_buffer = out_constant_values;
@@ -336,27 +340,56 @@ namespace acl
 				const uint32_t transform_index = output_transform_mapping[output_index];
 				const qvvf_ranges& transform_range = mutable_database.get_range(transform_index);
 
-				// todo: can be fixed size for rotation
 				if (!transform_range.is_rotation_default && transform_range.is_rotation_constant)
 				{
 					if (out_constant_values != nullptr)
 					{
-						const Vector4_32 rotation = mutable_database.get_rotation(segment, transform_index, 0);
-						if (num_rotation_sample_floats == 3)
-							vector_unaligned_write3(rotation, output_buffer);
-						else
-							vector_unaligned_write(rotation, output_buffer);
+						const Vector4_32 sample = mutable_database.get_rotation(segment, transform_index, 0);
+						switch (rotation_format)
+						{
+						case RotationFormat8::Quat_128:
+							vector_unaligned_write(sample, output_buffer);
+							break;
+						case RotationFormat8::QuatDropW_96:
+							vector_unaligned_write3(sample, output_buffer);
+							break;
+						case RotationFormat8::QuatDropW_48:
+						{
+							const uint32_t* sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
+
+							uint16_t* data = safe_ptr_cast<uint16_t>(output_buffer);
+							data[0] = safe_static_cast<uint16_t>(sample_u32[0]);
+							data[1] = safe_static_cast<uint16_t>(sample_u32[1]);
+							data[2] = safe_static_cast<uint16_t>(sample_u32[2]);
+							break;
+						}
+						case RotationFormat8::QuatDropW_32:
+						{
+							const uint32_t* sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
+
+							const uint32_t packed_u32 = (sample_u32[0] << (11 + 10)) | (sample_u32[1] << 10) | sample_u32[2];
+
+							// Written 2 bytes at a time to ensure safe alignment
+							uint16_t* data = safe_ptr_cast<uint16_t>(output_buffer);
+							data[0] = safe_static_cast<uint16_t>(packed_u32 >> 16);
+							data[1] = safe_static_cast<uint16_t>(packed_u32 & 0xFFFF);
+							break;
+						}
+						default:
+							ACL_ASSERT(false, "Invalid rotation format");
+							break;
+						}
 					}
 
-					output_buffer += sizeof(float) * num_rotation_sample_floats;
+					output_buffer += packed_rotation_size;
 				}
 
 				if (!transform_range.is_translation_default && transform_range.is_translation_constant)
 				{
 					if (out_constant_values != nullptr)
 					{
-						const Vector4_32 translation = mutable_database.get_translation(segment, transform_index, 0);
-						vector_unaligned_write3(translation, output_buffer);
+						const Vector4_32 sample = mutable_database.get_translation(segment, transform_index, 0);
+						vector_unaligned_write3(sample, output_buffer);
 					}
 
 					output_buffer += sizeof(float) * 3;
@@ -366,8 +399,8 @@ namespace acl
 				{
 					if (out_constant_values != nullptr)
 					{
-						const Vector4_32 scale = mutable_database.get_scale(segment, transform_index, 0);
-						vector_unaligned_write3(scale, output_buffer);
+						const Vector4_32 sample = mutable_database.get_scale(segment, transform_index, 0);
+						vector_unaligned_write3(sample, output_buffer);
 					}
 
 					output_buffer += sizeof(float) * 3;

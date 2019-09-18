@@ -47,7 +47,7 @@ namespace acl
 
 		constexpr uint32_t get_num_components_per_transform(bool has_scale)
 		{
-			return has_scale ? 7 : 10;	// rot(4) + trans(3) + optional scale(3)
+			return has_scale ? 10 : 7;	// rot(4) + trans(3) + optional scale(3)
 		}
 
 		//////////////////////////////////////////////////////////////////////////

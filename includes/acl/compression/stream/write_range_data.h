@@ -292,7 +292,12 @@ namespace acl
 							if (out_range_data != nullptr)
 							{
 								const Vector4_32 sample = mutable_database.get_rotation(segment, transform_index, 0);
-								pack_vector3_u48_unsafe(sample, output_buffer);
+								const uint32_t* sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
+
+								uint16_t* data = safe_ptr_cast<uint16_t>(output_buffer);
+								data[0] = safe_static_cast<uint16_t>(sample_u32[0]);
+								data[1] = safe_static_cast<uint16_t>(sample_u32[1]);
+								data[2] = safe_static_cast<uint16_t>(sample_u32[2]);
 							}
 
 							output_buffer += sizeof(uint16_t) * 3;
@@ -320,7 +325,12 @@ namespace acl
 						if (out_range_data != nullptr)
 						{
 							const Vector4_32 sample = mutable_database.get_translation(segment, transform_index, 0);
-							pack_vector3_u48_unsafe(sample, output_buffer);
+							const uint32_t* sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
+
+							uint16_t* data = safe_ptr_cast<uint16_t>(output_buffer);
+							data[0] = safe_static_cast<uint16_t>(sample_u32[0]);
+							data[1] = safe_static_cast<uint16_t>(sample_u32[1]);
+							data[2] = safe_static_cast<uint16_t>(sample_u32[2]);
 						}
 
 						output_buffer += sizeof(uint16_t) * 3;
@@ -347,7 +357,12 @@ namespace acl
 						if (out_range_data != nullptr)
 						{
 							const Vector4_32 sample = mutable_database.get_scale(segment, transform_index, 0);
-							pack_vector3_u48_unsafe(sample, output_buffer);
+							const uint32_t* sample_u32 = safe_ptr_cast<const uint32_t>(vector_as_float_ptr(sample));
+
+							uint16_t* data = safe_ptr_cast<uint16_t>(output_buffer);
+							data[0] = safe_static_cast<uint16_t>(sample_u32[0]);
+							data[1] = safe_static_cast<uint16_t>(sample_u32[1]);
+							data[2] = safe_static_cast<uint16_t>(sample_u32[2]);
 						}
 
 						output_buffer += sizeof(uint16_t) * 3;

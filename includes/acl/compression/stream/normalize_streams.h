@@ -642,13 +642,13 @@ namespace acl
 
 					extract_vector3f_range(translations_x, translations_y, translations_z, num_soa_entries, segment_range.translation_min, segment_range.translation_max);
 
-					Vector4_32 range_min = vector_unaligned_load(segment_range.translation_min);
-					Vector4_32 range_max = vector_unaligned_load(segment_range.translation_max);
+					Vector4_32 range_min = vector_unaligned_load3(segment_range.translation_min);
+					Vector4_32 range_max = vector_unaligned_load3(segment_range.translation_max);
 					Vector4_32 range_extent;
 					fixup_range(range_min, range_max, range_extent);
-					vector_unaligned_write(range_min, segment_range.translation_min);
-					vector_unaligned_write(range_max, segment_range.translation_max);
-					vector_unaligned_write(range_extent, segment_range.translation_extent);
+					vector_unaligned_write3(range_min, segment_range.translation_min);
+					vector_unaligned_write3(range_max, segment_range.translation_max);
+					vector_unaligned_write3(range_extent, segment_range.translation_extent);
 				}
 
 				if (has_scale)
@@ -660,13 +660,13 @@ namespace acl
 
 					extract_vector3f_range(scales_x, scales_y, scales_z, num_soa_entries, segment_range.scale_min, segment_range.scale_max);
 
-					Vector4_32 range_min = vector_unaligned_load(segment_range.scale_min);
-					Vector4_32 range_max = vector_unaligned_load(segment_range.scale_max);
+					Vector4_32 range_min = vector_unaligned_load3(segment_range.scale_min);
+					Vector4_32 range_max = vector_unaligned_load3(segment_range.scale_max);
 					Vector4_32 range_extent;
 					fixup_range(range_min, range_max, range_extent);
-					vector_unaligned_write(range_min, segment_range.scale_min);
-					vector_unaligned_write(range_max, segment_range.scale_max);
-					vector_unaligned_write(range_extent, segment_range.scale_extent);
+					vector_unaligned_write3(range_min, segment_range.scale_min);
+					vector_unaligned_write3(range_max, segment_range.scale_max);
+					vector_unaligned_write3(range_extent, segment_range.scale_extent);
 				}
 				else
 				{
