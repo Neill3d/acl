@@ -617,7 +617,7 @@ namespace acl
 
 	inline Vector4_32 ACL_SIMD_CALL decay_vector3_u48(Vector4_32Arg0 input)
 	{
-		ACL_ASSERT(vector_all_greater_equal3(input, vector_zero_32()) && vector_all_less_equal(input, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f", vector_get_x(input), vector_get_y(input), vector_get_z(input));
+		ACL_ASSERT(vector_all_greater_equal3(input, vector_zero_32()) && vector_all_less_equal3(input, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f", vector_get_x(input), vector_get_y(input), vector_get_z(input));
 
 		const float max_value = float((1 << 16) - 1);
 		const float inv_max_value = 1.0f / max_value;
@@ -627,12 +627,55 @@ namespace acl
 		return decayed;
 	}
 
+	namespace acl_impl
+	{
+		inline void ACL_SIMD_CALL decay_vector3_u48_soa(Vector4_32& inputs_x, Vector4_32& inputs_y, Vector4_32& inputs_z, const StaticQuantizationScales<16>& scales)
+		{
+			ACL_ASSERT(vector_all_greater_equal(inputs_x, vector_zero_32()) && vector_all_less_equal(inputs_x, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(inputs_x), vector_get_y(inputs_x), vector_get_z(inputs_x), vector_get_w(inputs_x));
+			ACL_ASSERT(vector_all_greater_equal(inputs_y, vector_zero_32()) && vector_all_less_equal(inputs_y, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(inputs_y), vector_get_y(inputs_y), vector_get_z(inputs_y), vector_get_w(inputs_y));
+			ACL_ASSERT(vector_all_greater_equal(inputs_z, vector_zero_32()) && vector_all_less_equal(inputs_z, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(inputs_z), vector_get_y(inputs_z), vector_get_z(inputs_z), vector_get_w(inputs_z));
+
+			const Vector4_32 packed_x = vector_symmetric_round(vector_mul(inputs_x, scales.max_value));
+			const Vector4_32 packed_y = vector_symmetric_round(vector_mul(inputs_y, scales.max_value));
+			const Vector4_32 packed_z = vector_symmetric_round(vector_mul(inputs_z, scales.max_value));
+
+			inputs_x = vector_mul(packed_x, scales.inv_max_value);
+			inputs_y = vector_mul(packed_y, scales.inv_max_value);
+			inputs_z = vector_mul(packed_z, scales.inv_max_value);
+		}
+
+		inline void ACL_SIMD_CALL decay_vector3_s48_soa(Vector4_32& inputs_x, Vector4_32& inputs_y, Vector4_32& inputs_z, const StaticQuantizationScales<16>& scales)
+		{
+			const Vector4_32 half = vector_set(0.5f);
+			const Vector4_32 unsigned_inputs_x = vector_mul_add(inputs_x, half, half);
+			const Vector4_32 unsigned_inputs_y = vector_mul_add(inputs_y, half, half);
+			const Vector4_32 unsigned_inputs_z = vector_mul_add(inputs_z, half, half);
+
+			ACL_ASSERT(vector_all_greater_equal(unsigned_inputs_x, vector_zero_32()) && vector_all_less_equal(unsigned_inputs_x, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(unsigned_inputs_x), vector_get_y(unsigned_inputs_x), vector_get_z(unsigned_inputs_x), vector_get_w(unsigned_inputs_x));
+			ACL_ASSERT(vector_all_greater_equal(unsigned_inputs_y, vector_zero_32()) && vector_all_less_equal(unsigned_inputs_y, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(unsigned_inputs_y), vector_get_y(unsigned_inputs_y), vector_get_z(unsigned_inputs_y), vector_get_w(unsigned_inputs_y));
+			ACL_ASSERT(vector_all_greater_equal(unsigned_inputs_z, vector_zero_32()) && vector_all_less_equal(unsigned_inputs_z, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(unsigned_inputs_z), vector_get_y(unsigned_inputs_z), vector_get_z(unsigned_inputs_z), vector_get_w(unsigned_inputs_z));
+
+			const Vector4_32 packed_x = vector_symmetric_round(vector_mul(unsigned_inputs_x, scales.max_value));
+			const Vector4_32 packed_y = vector_symmetric_round(vector_mul(unsigned_inputs_y, scales.max_value));
+			const Vector4_32 packed_z = vector_symmetric_round(vector_mul(unsigned_inputs_z, scales.max_value));
+
+			const Vector4_32 decayed_x = vector_mul(packed_x, scales.inv_max_value);
+			const Vector4_32 decayed_y = vector_mul(packed_y, scales.inv_max_value);
+			const Vector4_32 decayed_z = vector_mul(packed_z, scales.inv_max_value);
+
+			const Vector4_32 minus_one = vector_set(-1.0f);
+			inputs_x = vector_neg_mul_sub(decayed_x, -2.0f, minus_one);
+			inputs_y = vector_neg_mul_sub(decayed_y, -2.0f, minus_one);
+			inputs_z = vector_neg_mul_sub(decayed_z, -2.0f, minus_one);
+		}
+	}
+
 	inline Vector4_32 ACL_SIMD_CALL decay_vector3_s48(Vector4_32Arg0 input)
 	{
 		const Vector4_32 half = vector_set(0.5f);
 		const Vector4_32 unsigned_input = vector_mul_add(input, half, half);
 
-		ACL_ASSERT(vector_all_greater_equal3(unsigned_input, vector_zero_32()) && vector_all_less_equal(unsigned_input, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f", vector_get_x(unsigned_input), vector_get_y(unsigned_input), vector_get_z(unsigned_input));
+		ACL_ASSERT(vector_all_greater_equal3(unsigned_input, vector_zero_32()) && vector_all_less_equal3(unsigned_input, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f", vector_get_x(unsigned_input), vector_get_y(unsigned_input), vector_get_z(unsigned_input));
 
 		const float max_value = safe_to_float((1 << 16) - 1);
 		const float inv_max_value = 1.0f / max_value;
@@ -656,6 +699,41 @@ namespace acl
 		uint16_t* data = safe_ptr_cast<uint16_t>(out_vector_data);
 		data[0] = safe_static_cast<uint16_t>(vector_u32 >> 16);
 		data[1] = safe_static_cast<uint16_t>(vector_u32 & 0xFFFF);
+	}
+
+	inline Vector4_32 ACL_SIMD_CALL decay_vector3_u32(Vector4_32Arg0 input, uint8_t XBits, uint8_t YBits, uint8_t ZBits)
+	{
+		ACL_ASSERT(XBits + YBits + ZBits == 32, "Sum of XYZ bits does not equal 32!");
+		ACL_ASSERT(vector_all_greater_equal3(input, vector_zero_32()) && vector_all_less_equal(input, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f", vector_get_x(input), vector_get_y(input), vector_get_z(input));
+
+		const float max_value_x = float((1 << XBits) - 1);
+		const float max_value_y = float((1 << YBits) - 1);
+		const float max_value_z = float((1 << ZBits) - 1);
+		const Vector4_32 max_value = vector_set(max_value_x, max_value_y, max_value_z);
+		const Vector4_32 inv_max_value = vector_reciprocal(max_value);
+
+		const Vector4_32 packed = vector_symmetric_round(vector_mul(input, max_value));
+		const Vector4_32 decayed = vector_mul(packed, inv_max_value);
+		return decayed;
+	}
+
+	inline Vector4_32 ACL_SIMD_CALL decay_vector3_s32(Vector4_32Arg0 input, uint8_t XBits, uint8_t YBits, uint8_t ZBits)
+	{
+		const Vector4_32 half = vector_set(0.5f);
+		const Vector4_32 unsigned_input = vector_mul_add(input, half, half);
+
+		ACL_ASSERT(XBits + YBits + ZBits == 32, "Sum of XYZ bits does not equal 32!");
+		ACL_ASSERT(vector_all_greater_equal3(unsigned_input, vector_zero_32()) && vector_all_less_equal(unsigned_input, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f", vector_get_x(unsigned_input), vector_get_y(unsigned_input), vector_get_z(unsigned_input));
+
+		const float max_value_x = float((1 << XBits) - 1);
+		const float max_value_y = float((1 << YBits) - 1);
+		const float max_value_z = float((1 << ZBits) - 1);
+		const Vector4_32 max_value = vector_set(max_value_x, max_value_y, max_value_z);
+		const Vector4_32 inv_max_value = vector_reciprocal(max_value);
+
+		const Vector4_32 packed = vector_symmetric_round(vector_mul(unsigned_input, max_value));
+		const Vector4_32 decayed = vector_mul(packed, inv_max_value);
+		return vector_neg_mul_sub(decayed, -2.0f, vector_set(-1.0f));
 	}
 
 	namespace acl_impl
@@ -739,6 +817,50 @@ namespace acl
 			outputs_z[2] = uint32_t(packed_z.z);
 			outputs_z[3] = uint32_t(packed_z.w);
 #endif
+		}
+
+		inline void ACL_SIMD_CALL decay_vector3_u32_soa(Vector4_32& inputs_x, Vector4_32& inputs_y, Vector4_32& inputs_z, const QuantizationScales& scales_x, const QuantizationScales& scales_y, const QuantizationScales& scales_z)
+		{
+			ACL_ASSERT(scales_x.num_bits + scales_y.num_bits + scales_z.num_bits < 32, "Cannot pack on more than 32 bits");
+
+			ACL_ASSERT(vector_all_greater_equal(inputs_x, vector_zero_32()) && vector_all_less_equal(inputs_x, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(inputs_x), vector_get_y(inputs_x), vector_get_z(inputs_x), vector_get_w(inputs_x));
+			ACL_ASSERT(vector_all_greater_equal(inputs_y, vector_zero_32()) && vector_all_less_equal(inputs_y, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(inputs_y), vector_get_y(inputs_y), vector_get_z(inputs_y), vector_get_w(inputs_y));
+			ACL_ASSERT(vector_all_greater_equal(inputs_z, vector_zero_32()) && vector_all_less_equal(inputs_z, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(inputs_z), vector_get_y(inputs_z), vector_get_z(inputs_z), vector_get_w(inputs_z));
+
+			const Vector4_32 packed_x = vector_symmetric_round(vector_mul(inputs_x, scales_x.max_value));
+			const Vector4_32 packed_y = vector_symmetric_round(vector_mul(inputs_y, scales_y.max_value));
+			const Vector4_32 packed_z = vector_symmetric_round(vector_mul(inputs_z, scales_z.max_value));
+
+			inputs_x = vector_mul(packed_x, scales_x.inv_max_value);
+			inputs_y = vector_mul(packed_y, scales_y.inv_max_value);
+			inputs_z = vector_mul(packed_z, scales_z.inv_max_value);
+		}
+
+		inline void ACL_SIMD_CALL decay_vector3_s32_soa(Vector4_32& inputs_x, Vector4_32& inputs_y, Vector4_32& inputs_z, const QuantizationScales& scales_x, const QuantizationScales& scales_y, const QuantizationScales& scales_z)
+		{
+			ACL_ASSERT(scales_x.num_bits + scales_y.num_bits + scales_z.num_bits < 32, "Cannot pack on more than 32 bits");
+
+			const Vector4_32 half = vector_set(0.5f);
+			const Vector4_32 unsigned_inputs_x = vector_mul_add(inputs_x, half, half);
+			const Vector4_32 unsigned_inputs_y = vector_mul_add(inputs_y, half, half);
+			const Vector4_32 unsigned_inputs_z = vector_mul_add(inputs_z, half, half);
+
+			ACL_ASSERT(vector_all_greater_equal(unsigned_inputs_x, vector_zero_32()) && vector_all_less_equal(unsigned_inputs_x, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(unsigned_inputs_x), vector_get_y(unsigned_inputs_x), vector_get_z(unsigned_inputs_x), vector_get_w(unsigned_inputs_x));
+			ACL_ASSERT(vector_all_greater_equal(unsigned_inputs_y, vector_zero_32()) && vector_all_less_equal(unsigned_inputs_y, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(unsigned_inputs_y), vector_get_y(unsigned_inputs_y), vector_get_z(unsigned_inputs_y), vector_get_w(unsigned_inputs_y));
+			ACL_ASSERT(vector_all_greater_equal(unsigned_inputs_z, vector_zero_32()) && vector_all_less_equal(unsigned_inputs_z, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(unsigned_inputs_z), vector_get_y(unsigned_inputs_z), vector_get_z(unsigned_inputs_z), vector_get_w(unsigned_inputs_z));
+
+			const Vector4_32 packed_x = vector_symmetric_round(vector_mul(unsigned_inputs_x, scales_x.max_value));
+			const Vector4_32 packed_y = vector_symmetric_round(vector_mul(unsigned_inputs_y, scales_y.max_value));
+			const Vector4_32 packed_z = vector_symmetric_round(vector_mul(unsigned_inputs_z, scales_z.max_value));
+
+			const Vector4_32 decayed_x = vector_mul(packed_x, scales_x.inv_max_value);
+			const Vector4_32 decayed_y = vector_mul(packed_y, scales_y.inv_max_value);
+			const Vector4_32 decayed_z = vector_mul(packed_z, scales_z.inv_max_value);
+
+			const Vector4_32 minus_one = vector_set(-1.0f);
+			inputs_x = vector_neg_mul_sub(decayed_x, -2.0f, minus_one);
+			inputs_y = vector_neg_mul_sub(decayed_y, -2.0f, minus_one);
+			inputs_z = vector_neg_mul_sub(decayed_z, -2.0f, minus_one);
 		}
 	}
 
@@ -1014,7 +1136,7 @@ namespace acl
 
 	inline Vector4_32 ACL_SIMD_CALL decay_vector3_uXX(Vector4_32Arg0 input, uint32_t num_bits)
 	{
-		ACL_ASSERT(vector_all_greater_equal(input, vector_zero_32()) && vector_all_less_equal(input, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f", vector_get_x(input), vector_get_y(input), vector_get_z(input));
+		ACL_ASSERT(vector_all_greater_equal3(input, vector_zero_32()) && vector_all_less_equal3(input, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f", vector_get_x(input), vector_get_y(input), vector_get_z(input));
 
 		const float max_value = safe_to_float((1 << num_bits) - 1);
 		const float inv_max_value = 1.0f / max_value;
@@ -1027,9 +1149,9 @@ namespace acl
 	inline Vector4_32 ACL_SIMD_CALL decay_vector3_sXX(Vector4_32Arg0 input, uint32_t num_bits)
 	{
 		const Vector4_32 half = vector_set(0.5f);
-		const Vector4_32 unsigned_input = vector_add(vector_mul(input, half), half);
+		const Vector4_32 unsigned_input = vector_mul_add(input, half, half);
 
-		ACL_ASSERT(vector_all_greater_equal(unsigned_input, vector_zero_32()) && vector_all_less_equal(unsigned_input, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f", vector_get_x(unsigned_input), vector_get_y(unsigned_input), vector_get_z(unsigned_input));
+		ACL_ASSERT(vector_all_greater_equal3(unsigned_input, vector_zero_32()) && vector_all_less_equal3(unsigned_input, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f", vector_get_x(unsigned_input), vector_get_y(unsigned_input), vector_get_z(unsigned_input));
 
 		const float max_value = safe_to_float((1 << num_bits) - 1);
 		const float inv_max_value = 1.0f / max_value;
@@ -1037,6 +1159,49 @@ namespace acl
 		const Vector4_32 packed = vector_symmetric_round(vector_mul(unsigned_input, max_value));
 		const Vector4_32 decayed = vector_mul(packed, inv_max_value);
 		return vector_neg_mul_sub(decayed, -2.0f, vector_set(-1.0f));
+	}
+
+	namespace acl_impl
+	{
+		inline void ACL_SIMD_CALL decay_vector3_uXX_soa(Vector4_32& inputs_x, Vector4_32& inputs_y, Vector4_32& inputs_z, const QuantizationScales& scales)
+		{
+			ACL_ASSERT(vector_all_greater_equal(inputs_x, vector_zero_32()) && vector_all_less_equal(inputs_x, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(inputs_x), vector_get_y(inputs_x), vector_get_z(inputs_x), vector_get_w(inputs_x));
+			ACL_ASSERT(vector_all_greater_equal(inputs_y, vector_zero_32()) && vector_all_less_equal(inputs_y, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(inputs_y), vector_get_y(inputs_y), vector_get_z(inputs_y), vector_get_w(inputs_y));
+			ACL_ASSERT(vector_all_greater_equal(inputs_z, vector_zero_32()) && vector_all_less_equal(inputs_z, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(inputs_z), vector_get_y(inputs_z), vector_get_z(inputs_z), vector_get_w(inputs_z));
+
+			const Vector4_32 packed_x = vector_symmetric_round(vector_mul(inputs_x, scales.max_value));
+			const Vector4_32 packed_y = vector_symmetric_round(vector_mul(inputs_y, scales.max_value));
+			const Vector4_32 packed_z = vector_symmetric_round(vector_mul(inputs_z, scales.max_value));
+
+			inputs_x = vector_mul(packed_x, scales.inv_max_value);
+			inputs_y = vector_mul(packed_y, scales.inv_max_value);
+			inputs_z = vector_mul(packed_z, scales.inv_max_value);
+		}
+
+		inline void ACL_SIMD_CALL decay_vector3_sXX_soa(Vector4_32& inputs_x, Vector4_32& inputs_y, Vector4_32& inputs_z, const QuantizationScales& scales)
+		{
+			const Vector4_32 half = vector_set(0.5f);
+			const Vector4_32 unsigned_inputs_x = vector_mul_add(inputs_x, half, half);
+			const Vector4_32 unsigned_inputs_y = vector_mul_add(inputs_y, half, half);
+			const Vector4_32 unsigned_inputs_z = vector_mul_add(inputs_z, half, half);
+
+			ACL_ASSERT(vector_all_greater_equal(unsigned_inputs_x, vector_zero_32()) && vector_all_less_equal(unsigned_inputs_x, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(unsigned_inputs_x), vector_get_y(unsigned_inputs_x), vector_get_z(unsigned_inputs_x), vector_get_w(unsigned_inputs_x));
+			ACL_ASSERT(vector_all_greater_equal(unsigned_inputs_y, vector_zero_32()) && vector_all_less_equal(unsigned_inputs_y, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(unsigned_inputs_y), vector_get_y(unsigned_inputs_y), vector_get_z(unsigned_inputs_y), vector_get_w(unsigned_inputs_y));
+			ACL_ASSERT(vector_all_greater_equal(unsigned_inputs_z, vector_zero_32()) && vector_all_less_equal(unsigned_inputs_z, vector_set(1.0f)), "Expected normalized unsigned input value: %f, %f, %f, %f", vector_get_x(unsigned_inputs_z), vector_get_y(unsigned_inputs_z), vector_get_z(unsigned_inputs_z), vector_get_w(unsigned_inputs_z));
+
+			const Vector4_32 packed_x = vector_symmetric_round(vector_mul(unsigned_inputs_x, scales.max_value));
+			const Vector4_32 packed_y = vector_symmetric_round(vector_mul(unsigned_inputs_y, scales.max_value));
+			const Vector4_32 packed_z = vector_symmetric_round(vector_mul(unsigned_inputs_z, scales.max_value));
+
+			const Vector4_32 decayed_x = vector_mul(packed_x, scales.inv_max_value);
+			const Vector4_32 decayed_y = vector_mul(packed_y, scales.inv_max_value);
+			const Vector4_32 decayed_z = vector_mul(packed_z, scales.inv_max_value);
+
+			const Vector4_32 minus_one = vector_set(-1.0f);
+			inputs_x = vector_neg_mul_sub(decayed_x, -2.0f, minus_one);
+			inputs_y = vector_neg_mul_sub(decayed_y, -2.0f, minus_one);
+			inputs_z = vector_neg_mul_sub(decayed_z, -2.0f, minus_one);
+		}
 	}
 
 	// Assumes the 'vector_data' is in big-endian order and padded in order to load up to 16 bytes from it

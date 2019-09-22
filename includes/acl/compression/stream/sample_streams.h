@@ -273,6 +273,24 @@ namespace acl
 
 	namespace acl_impl
 	{
+		inline Vector4_32 ACL_SIMD_CALL vector_sqrt(Vector4_32Arg0 input)
+		{
+#if defined(ACL_SSE2_INTRINSICS)
+			return _mm_sqrt_ps(input);
+#else
+			return vector_set(scalar_sqrt(vector_get_x(input)), scalar_sqrt(vector_get_y(input)), scalar_sqrt(vector_get_z(input)), scalar_sqrt(vector_get_w(input)));
+#endif
+		}
+
+		inline Vector4_32 ACL_SIMD_CALL quat_from_positive_w_soa(Vector4_32Arg0 rotations_x, Vector4_32Arg1 rotations_y, Vector4_32Arg2 rotations_z)
+		{
+			const Vector4_32 w_squared = vector_sub(vector_sub(vector_sub(vector_set(1.0f), vector_mul(rotations_x, rotations_x)), vector_mul(rotations_y, rotations_y)), vector_mul(rotations_z, rotations_z));
+			// w_squared can be negative either due to rounding or due to quantization imprecision, we take the absolute value
+			// to ensure the resulting quaternion is always normalized with a positive W component
+			return vector_sqrt(vector_abs(w_squared));
+		}
+
+
 		inline Quat_32 ACL_SIMD_CALL get_decayed_rotation_sample(const track_database& raw_database, const track_database& mutable_database, const segment_context& segment, uint32_t transform_index, uint32_t sample_index, uint8_t desired_bit_rate)
 		{
 			const RotationFormat8 raw_format = raw_database.get_rotation_format();
@@ -342,6 +360,138 @@ namespace acl
 
 			return impl::rotation_to_quat_32(packed_rotation, mutable_format);
 		}
+
+		inline void ACL_SIMD_CALL get_decayed_rotation_sample_soa(const track_database& raw_database, const track_database& mutable_database, const segment_context& segment, uint32_t transform_index, uint32_t sample_index, uint8_t desired_bit_rate, Quat_32* out_rotations)
+		{
+			ACL_ASSERT((sample_index % 4) == 0, "SOA decay requires a multiple of 4 sample index");
+
+			Vector4_32 rotations_x;
+			Vector4_32 rotations_y;
+			Vector4_32 rotations_z;
+
+			const RotationFormat8 raw_format = raw_database.get_rotation_format();
+			const RotationFormat8 mutable_format = mutable_database.get_rotation_format();
+
+			const qvvf_ranges& clip_transform_range = mutable_database.get_range(transform_index);
+			const qvvf_ranges& segment_transform_range = segment.ranges[transform_index];
+
+			bool is_clip_normalized;
+			bool is_segment_normalized;
+
+			if (is_constant_bit_rate(desired_bit_rate))
+			{
+				Vector4_32 rotation = raw_database.get_rotation(segment, transform_index, 0);
+				rotation = convert_rotation(rotation, raw_format, mutable_format);
+
+				ACL_ASSERT(clip_transform_range.are_rotations_normalized, "Cannot drop a constant track if it isn't normalized");
+
+				const Vector4_32 clip_range_min = vector_unaligned_load(clip_transform_range.rotation_min);
+				const Vector4_32 clip_range_extent = vector_unaligned_load(clip_transform_range.rotation_extent);
+
+				const Vector4_32 normalized_rotation = normalize_sample(rotation, clip_range_min, clip_range_extent);
+
+				const Vector4_32 packed_rotation = decay_vector3_u48(normalized_rotation);
+
+				rotations_x = vector_mix_xxxx(packed_rotation);
+				rotations_y = vector_mix_yyyy(packed_rotation);
+				rotations_z = vector_mix_zzzz(packed_rotation);
+
+				is_clip_normalized = clip_transform_range.are_rotations_normalized;
+				is_segment_normalized = false;
+			}
+			else if (is_raw_bit_rate(desired_bit_rate))
+			{
+				const Vector4_32* samples_x;
+				const Vector4_32* samples_y;
+				const Vector4_32* samples_z;
+				const Vector4_32* samples_w;
+				raw_database.get_rotations(segment, transform_index, samples_x, samples_y, samples_z, samples_w);
+
+				const uint32_t entry_index = sample_index / 4;
+				rotations_x = samples_x[entry_index];
+				rotations_y = samples_y[entry_index];
+				rotations_z = samples_z[entry_index];
+				Vector4_32 rotations_w = samples_w[entry_index];	// We don't care about it, it'll be reconstructed lated
+
+				quat_ensure_positive_w_soa(rotations_x, rotations_y, rotations_z, rotations_w);
+
+				is_clip_normalized = false;
+				is_segment_normalized = false;
+			}
+			else
+			{
+				const Vector4_32* samples_x;
+				const Vector4_32* samples_y;
+				const Vector4_32* samples_z;
+				mutable_database.get_rotations(segment, transform_index, samples_x, samples_y, samples_z);
+
+				const uint32_t entry_index = sample_index / 4;
+				rotations_x = samples_x[entry_index];
+				rotations_y = samples_y[entry_index];
+				rotations_z = samples_z[entry_index];
+
+				const uint32_t num_bits_at_bit_rate = get_num_bits_at_bit_rate(desired_bit_rate);
+				const QuantizationScales scales(num_bits_at_bit_rate);
+				if (clip_transform_range.are_rotations_normalized)
+					decay_vector3_uXX_soa(rotations_x, rotations_y, rotations_z, scales);
+				else
+					decay_vector3_sXX_soa(rotations_x, rotations_y, rotations_z, scales);
+
+				is_clip_normalized = clip_transform_range.are_rotations_normalized;
+				is_segment_normalized = segment_transform_range.are_rotations_normalized;
+			}
+
+			if (is_clip_normalized)
+			{
+				if (is_segment_normalized)
+				{
+					// TODO: Use scalarf, better for ARM?
+					const Vector4_32 segment_range_min_x = vector_broadcast(&segment_transform_range.rotation_min[0]);
+					const Vector4_32 segment_range_min_y = vector_broadcast(&segment_transform_range.rotation_min[1]);
+					const Vector4_32 segment_range_min_z = vector_broadcast(&segment_transform_range.rotation_min[2]);
+
+					const Vector4_32 segment_range_extent_x = vector_broadcast(&segment_transform_range.rotation_extent[0]);
+					const Vector4_32 segment_range_extent_y = vector_broadcast(&segment_transform_range.rotation_extent[1]);
+					const Vector4_32 segment_range_extent_z = vector_broadcast(&segment_transform_range.rotation_extent[2]);
+
+					rotations_x = vector_mul_add(rotations_x, segment_range_extent_x, segment_range_min_x);
+					rotations_y = vector_mul_add(rotations_y, segment_range_extent_y, segment_range_min_y);
+					rotations_z = vector_mul_add(rotations_z, segment_range_extent_z, segment_range_min_z);
+				}
+
+				// TODO: Use scalarf, better for ARM?
+				const Vector4_32 clip_range_min_x = vector_broadcast(&clip_transform_range.rotation_min[0]);
+				const Vector4_32 clip_range_min_y = vector_broadcast(&clip_transform_range.rotation_min[1]);
+				const Vector4_32 clip_range_min_z = vector_broadcast(&clip_transform_range.rotation_min[2]);
+
+				const Vector4_32 clip_range_extent_x = vector_broadcast(&clip_transform_range.rotation_extent[0]);
+				const Vector4_32 clip_range_extent_y = vector_broadcast(&clip_transform_range.rotation_extent[1]);
+				const Vector4_32 clip_range_extent_z = vector_broadcast(&clip_transform_range.rotation_extent[2]);
+
+				rotations_x = vector_mul_add(rotations_x, clip_range_extent_x, clip_range_min_x);
+				rotations_y = vector_mul_add(rotations_y, clip_range_extent_y, clip_range_min_y);
+				rotations_z = vector_mul_add(rotations_z, clip_range_extent_z, clip_range_min_z);
+			}
+
+			Vector4_32 rotations_w = quat_from_positive_w_soa(rotations_x, rotations_y, rotations_z);
+
+			quat_normalize_soa(rotations_x, rotations_y, rotations_z, rotations_w, rotations_x, rotations_y, rotations_z, rotations_w);
+
+			// Do 16 byte wide stores
+			const Vector4_32 rotations_x0y0x1y1 = vector_mix<VectorMix::X, VectorMix::A, VectorMix::Y, VectorMix::B>(rotations_x, rotations_y);
+			const Vector4_32 rotations_x2y2x3y3 = vector_mix<VectorMix::Z, VectorMix::C, VectorMix::W, VectorMix::D>(rotations_x, rotations_y);
+			const Vector4_32 rotations_z0w0z1w1 = vector_mix<VectorMix::X, VectorMix::A, VectorMix::Y, VectorMix::B>(rotations_z, rotations_w);
+			const Vector4_32 rotations_z2w2z3w3 = vector_mix<VectorMix::Z, VectorMix::C, VectorMix::W, VectorMix::D>(rotations_z, rotations_w);
+			const Vector4_32 rotation0 = vector_mix<VectorMix::X, VectorMix::Y, VectorMix::A, VectorMix::B>(rotations_x0y0x1y1, rotations_z0w0z1w1);
+			const Vector4_32 rotation1 = vector_mix<VectorMix::Z, VectorMix::W, VectorMix::C, VectorMix::D>(rotations_x0y0x1y1, rotations_z0w0z1w1);
+			const Vector4_32 rotation2 = vector_mix<VectorMix::X, VectorMix::Y, VectorMix::A, VectorMix::B>(rotations_x2y2x3y3, rotations_z2w2z3w3);
+			const Vector4_32 rotation3 = vector_mix<VectorMix::Z, VectorMix::W, VectorMix::C, VectorMix::D>(rotations_x2y2x3y3, rotations_z2w2z3w3);
+
+			out_rotations[0] = vector_to_quat(rotation0);
+			out_rotations[1] = vector_to_quat(rotation1);
+			out_rotations[2] = vector_to_quat(rotation2);
+			out_rotations[3] = vector_to_quat(rotation3);
+		}
 	}
 
 	inline Quat_32 ACL_SIMD_CALL get_rotation_sample(const BoneStreams& bone_steams, uint32_t sample_index, RotationFormat8 desired_format)
@@ -355,7 +505,6 @@ namespace acl
 		const Vector4_32 rotation = impl::load_rotation_sample(quantized_ptr, format, k_invalid_bit_rate, are_rotations_normalized);
 
 		// Pack and unpack in our desired format
-		alignas(16) uint8_t raw_data[16] = { 0 };
 		Vector4_32 packed_rotation;
 
 		switch (desired_format)
@@ -365,14 +514,10 @@ namespace acl
 			packed_rotation = rotation;
 			break;
 		case RotationFormat8::QuatDropW_48:
-			if (are_rotations_normalized)
-				packed_rotation = decay_vector3_u48(rotation);
-			else
-				packed_rotation = decay_vector3_s48(rotation);
+			packed_rotation = are_rotations_normalized ? decay_vector3_u48(rotation) : decay_vector3_s48(rotation);
 			break;
 		case RotationFormat8::QuatDropW_32:
-			pack_vector3_32(rotation, 11, 11, 10, are_rotations_normalized, &raw_data[0]);
-			packed_rotation = unpack_vector3_32(11, 11, 10, are_rotations_normalized, &raw_data[0]);
+			packed_rotation = are_rotations_normalized ? decay_vector3_u32(rotation, 11, 11, 10) : decay_vector3_s32(rotation, 11, 11, 10);
 			break;
 		default:
 			ACL_ASSERT(false, "Invalid or unsupported rotation format: %s", get_rotation_format_name(desired_format));
@@ -410,10 +555,13 @@ namespace acl
 			const qvvf_ranges& clip_transform_range = mutable_database.get_range(transform_index);
 			const qvvf_ranges& segment_transform_range = segment.ranges[transform_index];
 
-			const Vector4_32 rotation = mutable_database.get_rotation(segment, transform_index, sample_index);
+			Vector4_32 rotation = mutable_database.get_rotation(segment, transform_index, sample_index);
+
+			const RotationFormat8 rotation_format = mutable_database.get_rotation_format();
+			if (rotation_format == RotationFormat8::Quat_128 && get_rotation_variant(rotation_format) == RotationVariant8::QuatDropW)
+				rotation = convert_rotation(rotation, rotation_format, desired_format);
 
 			// Pack and unpack in our desired format
-			alignas(16) uint8_t raw_data[16] = { 0 };
 			Vector4_32 packed_rotation;
 
 			switch (desired_format)
@@ -426,8 +574,7 @@ namespace acl
 				packed_rotation = clip_transform_range.are_rotations_normalized ? decay_vector3_u48(rotation) : decay_vector3_s48(rotation);
 				break;
 			case RotationFormat8::QuatDropW_32:
-				pack_vector3_32(rotation, 11, 11, 10, clip_transform_range.are_rotations_normalized, &raw_data[0]);
-				packed_rotation = unpack_vector3_32(11, 11, 10, clip_transform_range.are_rotations_normalized, &raw_data[0]);
+				packed_rotation = clip_transform_range.are_rotations_normalized ? decay_vector3_u32(rotation, 11, 11, 10) : decay_vector3_s32(rotation, 11, 11, 10);
 				break;
 			default:
 				ACL_ASSERT(false, "Unexpected rotation format: %s", get_rotation_format_name(desired_format));
@@ -452,6 +599,117 @@ namespace acl
 			}
 
 			return impl::rotation_to_quat_32(packed_rotation, desired_format);
+		}
+
+		inline void ACL_SIMD_CALL get_decayed_rotation_sample_soa(const track_database& mutable_database, const segment_context& segment, uint32_t transform_index, uint32_t sample_index, RotationFormat8 desired_format, Quat_32* out_rotations)
+		{
+			ACL_ASSERT((sample_index % 4) == 0, "SOA decay requires a multiple of 4 sample index");
+
+			const uint32_t entry_index = sample_index / 4;
+
+			const Vector4_32* samples_x;
+			const Vector4_32* samples_y;
+			const Vector4_32* samples_z;
+			const Vector4_32* samples_w;
+			mutable_database.get_rotations(segment, transform_index, samples_x, samples_y, samples_z, samples_w);
+
+			Vector4_32 rotations_x = samples_x[entry_index];
+			Vector4_32 rotations_y = samples_y[entry_index];
+			Vector4_32 rotations_z = samples_z[entry_index];
+			Vector4_32 rotations_w = samples_w[entry_index];
+
+			const RotationFormat8 rotation_format = mutable_database.get_rotation_format();
+			if (rotation_format == RotationFormat8::Quat_128 && get_rotation_variant(rotation_format) == RotationVariant8::QuatDropW)
+				quat_ensure_positive_w_soa(rotations_x, rotations_y, rotations_z, rotations_w);
+
+			const qvvf_ranges& clip_transform_range = mutable_database.get_range(transform_index);
+
+			const StaticQuantizationScales<16> scales16;
+			const StaticQuantizationScales<11> scales11;
+			const StaticQuantizationScales<10> scales10;
+
+			// Pack and unpack in our desired format
+			switch (desired_format)
+			{
+			case RotationFormat8::Quat_128:
+			case RotationFormat8::QuatDropW_96:
+				// Nothing to do
+				break;
+			case RotationFormat8::QuatDropW_48:
+				if (clip_transform_range.are_rotations_normalized)
+					decay_vector3_u48_soa(rotations_x, rotations_y, rotations_z, scales16);
+				else
+					decay_vector3_s48_soa(rotations_x, rotations_y, rotations_z, scales16);
+				break;
+			case RotationFormat8::QuatDropW_32:
+				if (clip_transform_range.are_rotations_normalized)
+					decay_vector3_u32_soa(rotations_x, rotations_y, rotations_z, scales11, scales11, scales10);
+				else
+					decay_vector3_s32_soa(rotations_x, rotations_y, rotations_z, scales11, scales11, scales10);
+				break;
+			default:
+				ACL_ASSERT(false, "Unexpected rotation format: %s", get_rotation_format_name(desired_format));
+				break;
+			}
+
+			if (clip_transform_range.are_rotations_normalized)
+			{
+				const qvvf_ranges& segment_transform_range = segment.ranges[transform_index];
+				if (segment_transform_range.are_rotations_normalized)
+				{
+					// TODO: Use scalarf, better for ARM?
+					const Vector4_32 segment_range_min_x = vector_broadcast(&segment_transform_range.rotation_min[0]);
+					const Vector4_32 segment_range_min_y = vector_broadcast(&segment_transform_range.rotation_min[1]);
+					const Vector4_32 segment_range_min_z = vector_broadcast(&segment_transform_range.rotation_min[2]);
+					const Vector4_32 segment_range_min_w = vector_broadcast(&segment_transform_range.rotation_min[3]);
+
+					const Vector4_32 segment_range_extent_x = vector_broadcast(&segment_transform_range.rotation_extent[0]);
+					const Vector4_32 segment_range_extent_y = vector_broadcast(&segment_transform_range.rotation_extent[1]);
+					const Vector4_32 segment_range_extent_z = vector_broadcast(&segment_transform_range.rotation_extent[2]);
+					const Vector4_32 segment_range_extent_w = vector_broadcast(&segment_transform_range.rotation_extent[3]);
+
+					rotations_x = vector_mul_add(rotations_x, segment_range_extent_x, segment_range_min_x);
+					rotations_y = vector_mul_add(rotations_y, segment_range_extent_y, segment_range_min_y);
+					rotations_z = vector_mul_add(rotations_z, segment_range_extent_z, segment_range_min_z);
+					rotations_w = vector_mul_add(rotations_w, segment_range_extent_w, segment_range_min_w);
+				}
+
+				// TODO: Use scalarf, better for ARM?
+				const Vector4_32 clip_range_min_x = vector_broadcast(&clip_transform_range.rotation_min[0]);
+				const Vector4_32 clip_range_min_y = vector_broadcast(&clip_transform_range.rotation_min[1]);
+				const Vector4_32 clip_range_min_z = vector_broadcast(&clip_transform_range.rotation_min[2]);
+				const Vector4_32 clip_range_min_w = vector_broadcast(&clip_transform_range.rotation_min[3]);
+
+				const Vector4_32 clip_range_extent_x = vector_broadcast(&clip_transform_range.rotation_extent[0]);
+				const Vector4_32 clip_range_extent_y = vector_broadcast(&clip_transform_range.rotation_extent[1]);
+				const Vector4_32 clip_range_extent_z = vector_broadcast(&clip_transform_range.rotation_extent[2]);
+				const Vector4_32 clip_range_extent_w = vector_broadcast(&clip_transform_range.rotation_extent[3]);
+
+				rotations_x = vector_mul_add(rotations_x, clip_range_extent_x, clip_range_min_x);
+				rotations_y = vector_mul_add(rotations_y, clip_range_extent_y, clip_range_min_y);
+				rotations_z = vector_mul_add(rotations_z, clip_range_extent_z, clip_range_min_z);
+				rotations_w = vector_mul_add(rotations_w, clip_range_extent_w, clip_range_min_w);
+			}
+
+			if (desired_format != RotationFormat8::Quat_128)
+				rotations_w = quat_from_positive_w_soa(rotations_x, rotations_y, rotations_z);
+
+			quat_normalize_soa(rotations_x, rotations_y, rotations_z, rotations_w, rotations_x, rotations_y, rotations_z, rotations_w);
+
+			// Do 16 byte wide stores
+			const Vector4_32 rotations_x0y0x1y1 = vector_mix<VectorMix::X, VectorMix::A, VectorMix::Y, VectorMix::B>(rotations_x, rotations_y);
+			const Vector4_32 rotations_x2y2x3y3 = vector_mix<VectorMix::Z, VectorMix::C, VectorMix::W, VectorMix::D>(rotations_x, rotations_y);
+			const Vector4_32 rotations_z0w0z1w1 = vector_mix<VectorMix::X, VectorMix::A, VectorMix::Y, VectorMix::B>(rotations_z, rotations_w);
+			const Vector4_32 rotations_z2w2z3w3 = vector_mix<VectorMix::Z, VectorMix::C, VectorMix::W, VectorMix::D>(rotations_z, rotations_w);
+			const Vector4_32 rotation0 = vector_mix<VectorMix::X, VectorMix::Y, VectorMix::A, VectorMix::B>(rotations_x0y0x1y1, rotations_z0w0z1w1);
+			const Vector4_32 rotation1 = vector_mix<VectorMix::Z, VectorMix::W, VectorMix::C, VectorMix::D>(rotations_x0y0x1y1, rotations_z0w0z1w1);
+			const Vector4_32 rotation2 = vector_mix<VectorMix::X, VectorMix::Y, VectorMix::A, VectorMix::B>(rotations_x2y2x3y3, rotations_z2w2z3w3);
+			const Vector4_32 rotation3 = vector_mix<VectorMix::Z, VectorMix::W, VectorMix::C, VectorMix::D>(rotations_x2y2x3y3, rotations_z2w2z3w3);
+
+			out_rotations[0] = vector_to_quat(rotation0);
+			out_rotations[1] = vector_to_quat(rotation1);
+			out_rotations[2] = vector_to_quat(rotation2);
+			out_rotations[3] = vector_to_quat(rotation3);
 		}
 	}
 
@@ -664,7 +922,6 @@ namespace acl
 		const Vector4_32 translation = impl::load_vector_sample(quantized_ptr, format, k_invalid_bit_rate);
 
 		// Pack and unpack in our desired format
-		alignas(16) uint8_t raw_data[16] = { 0 };
 		Vector4_32 packed_translation;
 
 		switch (desired_format)
@@ -677,8 +934,8 @@ namespace acl
 			packed_translation = decay_vector3_u48(translation);
 			break;
 		case VectorFormat8::Vector3_32:
-			pack_vector3_32(translation, 11, 11, 10, are_translations_normalized, &raw_data[0]);
-			packed_translation = unpack_vector3_32(11, 11, 10, are_translations_normalized, &raw_data[0]);
+			ACL_ASSERT(are_translations_normalized, "Translations must be normalized to support this format");
+			packed_translation = decay_vector3_u32(translation, 11, 11, 10);
 			break;
 		default:
 			ACL_ASSERT(false, "Invalid or unsupported vector format: %s", get_vector_format_name(desired_format));
@@ -719,7 +976,6 @@ namespace acl
 			const Vector4_32 translation = mutable_database.get_translation(segment, transform_index, sample_index);
 
 			// Pack and unpack in our desired format
-			alignas(16) uint8_t raw_data[16] = { 0 };
 			Vector4_32 packed_translation;
 
 			switch (desired_format)
@@ -733,8 +989,7 @@ namespace acl
 				break;
 			case VectorFormat8::Vector3_32:
 				ACL_ASSERT(clip_transform_range.are_translations_normalized, "Translations must be normalized to support this format");
-				pack_vector3_32(translation, 11, 11, 10, true, &raw_data[0]);
-				packed_translation = unpack_vector3_32(11, 11, 10, true, &raw_data[0]);
+				packed_translation = decay_vector3_u32(translation, 11, 11, 10);
 				break;
 			default:
 				ACL_ASSERT(false, "Invalid or unsupported vector format: %s", get_vector_format_name(desired_format));
@@ -971,7 +1226,6 @@ namespace acl
 		const Vector4_32 scale = impl::load_vector_sample(quantized_ptr, format, k_invalid_bit_rate);
 
 		// Pack and unpack in our desired format
-		alignas(16) uint8_t raw_data[16] = { 0 };
 		Vector4_32 packed_scale;
 
 		switch (desired_format)
@@ -984,8 +1238,8 @@ namespace acl
 			packed_scale = decay_vector3_u48(scale);
 			break;
 		case VectorFormat8::Vector3_32:
-			pack_vector3_32(scale, 11, 11, 10, are_scales_normalized, &raw_data[0]);
-			packed_scale = unpack_vector3_32(11, 11, 10, are_scales_normalized, &raw_data[0]);
+			ACL_ASSERT(are_scales_normalized, "Scales must be normalized to support this format");
+			packed_scale = decay_vector3_u32(scale, 11, 11, 10);
 			break;
 		default:
 			ACL_ASSERT(false, "Invalid or unsupported vector format: %s", get_vector_format_name(desired_format));
@@ -1026,7 +1280,6 @@ namespace acl
 			const Vector4_32 scale = mutable_database.get_scale(segment, transform_index, sample_index);
 
 			// Pack and unpack in our desired format
-			alignas(16) uint8_t raw_data[16] = { 0 };
 			Vector4_32 packed_scale;
 
 			switch (desired_format)
@@ -1040,8 +1293,7 @@ namespace acl
 				break;
 			case VectorFormat8::Vector3_32:
 				ACL_ASSERT(clip_transform_range.are_scales_normalized, "Scales must be normalized to support this format");
-				pack_vector3_32(scale, 11, 11, 10, true, &raw_data[0]);
-				packed_scale = unpack_vector3_32(11, 11, 10, true, &raw_data[0]);
+				packed_scale = decay_vector3_u32(scale, 11, 11, 10);
 				break;
 			default:
 				ACL_ASSERT(false, "Invalid or unsupported vector format: %s", get_vector_format_name(desired_format));

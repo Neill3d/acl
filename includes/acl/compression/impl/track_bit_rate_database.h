@@ -34,7 +34,8 @@
 #include <cstdint>
 
 // 0 = disabled, 1 = enabled
-#define ACL_IMPL_DEBUG_DATABASE_IMPL 0
+#define ACL_IMPL_DEBUG_DATABASE_IMPL	0
+#define ACL_IMPL_USE_SOA_DECAY			1
 
 ACL_IMPL_FILE_PRAGMA_PUSH
 
@@ -481,7 +482,11 @@ namespace acl
 			if (m_data == nullptr)
 			{
 				// First segment, initialize everything else
+#if ACL_IMPL_USE_SOA_DECAY
+				const uint32_t num_samples_per_track = segment.num_simd_samples_per_track;
+#else
 				const uint32_t num_samples_per_track = segment.num_samples_per_track;
+#endif
 				m_num_samples_per_track = num_samples_per_track;
 
 				m_bitset_desc = BitSetDescription::make_from_num_bits(num_samples_per_track);
@@ -865,7 +870,7 @@ namespace acl
 				{
 					// Not cached
 					if (m_is_rotation_variable)
-						rotation = get_rotation_sample(*m_raw_track_database, *m_segment, context.track_index, 0);
+						rotation = get_decayed_rotation_sample(*m_raw_track_database, *m_segment, context.track_index, 0, get_highest_variant_precision(get_rotation_variant(m_rotation_format)));
 					else
 						rotation = get_decayed_rotation_sample(*m_raw_track_database, *m_segment, context.track_index, 0, m_rotation_format);
 
@@ -912,6 +917,40 @@ namespace acl
 				else
 				{
 					// Not cached
+#if ACL_IMPL_USE_SOA_DECAY
+					const uint32_t base_sample_index = key0 & ~3;
+					if (m_is_rotation_variable)
+						get_decayed_rotation_sample_soa(*m_raw_track_database, *m_mutable_track_database, *m_segment, context.track_index, base_sample_index, context.bit_rates.rotation, cached_samples + base_sample_index);
+					else
+						get_decayed_rotation_sample_soa(*m_mutable_track_database, *m_segment, context.track_index, base_sample_index, m_rotation_format, cached_samples + base_sample_index);
+
+					sample0 = cached_samples[key0];
+					bitset_set_range(validity_bitset, m_bitset_desc, base_sample_index, 4, true);
+
+#if 0
+					Vector4_32 tmp;
+					if (m_is_rotation_variable)
+						tmp = get_decayed_rotation_sample(*m_raw_track_database, *m_mutable_track_database, *m_segment, context.track_index, base_sample_index + 0, context.bit_rates.rotation);
+					else
+						tmp = get_decayed_rotation_sample(*m_mutable_track_database, *m_segment, context.track_index, base_sample_index + 0, m_rotation_format);
+					ACL_ASSERT(vector_all_near_equal(cached_samples[base_sample_index + 0], tmp), "!!!");
+					if (m_is_rotation_variable)
+						tmp = get_decayed_rotation_sample(*m_raw_track_database, *m_mutable_track_database, *m_segment, context.track_index, base_sample_index + 1, context.bit_rates.rotation);
+					else
+						tmp = get_decayed_rotation_sample(*m_mutable_track_database, *m_segment, context.track_index, base_sample_index + 1, m_rotation_format);
+					ACL_ASSERT(vector_all_near_equal(cached_samples[base_sample_index + 1], tmp), "!!!");
+					if (m_is_rotation_variable)
+						tmp = get_decayed_rotation_sample(*m_raw_track_database, *m_mutable_track_database, *m_segment, context.track_index, base_sample_index + 2, context.bit_rates.rotation);
+					else
+						tmp = get_decayed_rotation_sample(*m_mutable_track_database, *m_segment, context.track_index, base_sample_index + 2, m_rotation_format);
+					ACL_ASSERT(vector_all_near_equal(cached_samples[base_sample_index + 2], tmp), "!!!");
+					if (m_is_rotation_variable)
+						tmp = get_decayed_rotation_sample(*m_raw_track_database, *m_mutable_track_database, *m_segment, context.track_index, base_sample_index + 3, context.bit_rates.rotation);
+					else
+						tmp = get_decayed_rotation_sample(*m_mutable_track_database, *m_segment, context.track_index, base_sample_index + 3, m_rotation_format);
+					ACL_ASSERT(vector_all_near_equal(cached_samples[base_sample_index + 3], tmp), "!!!");
+#endif
+#else
 					if (m_is_rotation_variable)
 						sample0 = get_decayed_rotation_sample(*m_raw_track_database, *m_mutable_track_database, *m_segment, context.track_index, key0, context.bit_rates.rotation);
 					else
@@ -923,6 +962,7 @@ namespace acl
 
 					cached_samples[key0] = sample0;
 					bitset_set(validity_bitset, bitref0, true);
+#endif
 
 #if ACL_IMPL_DEBUG_DATABASE_IMPL
 					printf("Cached sample %u for rotation track %u at bit rate %u (%.5f, %.5f, %.5f, %.5f)...\n", key0, track_index, context.bit_rates.rotation, quat_get_x(sample0), quat_get_y(sample0), quat_get_z(sample0), quat_get_w(sample0));
@@ -944,6 +984,16 @@ namespace acl
 					else
 					{
 						// Not cached
+#if ACL_IMPL_USE_SOA_DECAY
+						const uint32_t base_sample_index = key1 & ~3;
+						if (m_is_rotation_variable)
+							get_decayed_rotation_sample_soa(*m_raw_track_database, *m_mutable_track_database, *m_segment, context.track_index, base_sample_index, context.bit_rates.rotation, cached_samples + base_sample_index);
+						else
+							get_decayed_rotation_sample_soa(*m_mutable_track_database, *m_segment, context.track_index, base_sample_index, m_rotation_format, cached_samples + base_sample_index);
+
+						sample1 = cached_samples[key1];
+						bitset_set_range(validity_bitset, m_bitset_desc, base_sample_index, 4, true);
+#else
 						if (m_is_rotation_variable)
 							sample1 = get_decayed_rotation_sample(*m_raw_track_database, *m_mutable_track_database, *m_segment, context.track_index, key1, context.bit_rates.rotation);
 						else
@@ -951,6 +1001,7 @@ namespace acl
 
 						cached_samples[key1] = sample1;
 						bitset_set(validity_bitset, bitref1, true);
+#endif
 
 #if ACL_IMPL_DEBUG_DATABASE_IMPL
 						printf("Cached sample %u for rotation track %u at bit rate %u (%.5f, %.5f, %.5f, %.5f)...\n", key1, track_index, context.bit_rates.rotation, quat_get_x(sample1), quat_get_y(sample1), quat_get_z(sample1), quat_get_w(sample1));

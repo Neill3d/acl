@@ -98,6 +98,8 @@ namespace acl
 
 			inline void get_rotations(const segment_context& segment, uint32_t transform_index, Vector4_32*& out_rotations_x, Vector4_32*& out_rotations_y, Vector4_32*& out_rotations_z, Vector4_32*& out_rotations_w);
 			inline void get_rotations(const segment_context& segment, uint32_t transform_index, const Vector4_32*& out_rotations_x, const Vector4_32*& out_rotations_y, const Vector4_32*& out_rotations_z, const Vector4_32*& out_rotations_w) const;
+			inline void get_rotations(const segment_context& segment, uint32_t transform_index, Vector4_32*& out_rotations_x, Vector4_32*& out_rotations_y, Vector4_32*& out_rotations_z);
+			inline void get_rotations(const segment_context& segment, uint32_t transform_index, const Vector4_32*& out_rotations_x, const Vector4_32*& out_rotations_y, const Vector4_32*& out_rotations_z) const;
 			inline void get_translations(const segment_context& segment, uint32_t transform_index, Vector4_32*& out_translations_x, Vector4_32*& out_translations_y, Vector4_32*& out_translations_z);
 			inline void get_translations(const segment_context& segment, uint32_t transform_index, const Vector4_32*& out_translations_x, const Vector4_32*& out_translations_y, const Vector4_32*& out_translations_z) const;
 			inline void get_scales(const segment_context& segment, uint32_t transform_index, Vector4_32*& out_scales_x, Vector4_32*& out_scales_y, Vector4_32*& out_scales_z);
@@ -308,6 +310,40 @@ namespace acl
 			out_rotations_y = rotations_y;
 			out_rotations_z = rotations_z;
 			out_rotations_w = rotations_w;
+		}
+
+		inline void track_database::get_rotations(const segment_context& segment, uint32_t transform_index, Vector4_32*& out_rotations_x, Vector4_32*& out_rotations_y, Vector4_32*& out_rotations_z)
+		{
+			const uint32_t num_components_per_transform = get_num_components_per_transform(m_has_scale);
+			const uint32_t num_simd_samples_per_track = segment.num_simd_samples_per_track;
+			const uint32_t component_size = sizeof(float) * num_simd_samples_per_track;
+			const uint32_t transform_size = component_size * num_components_per_transform;
+
+			const uint32_t offset_x = 0;
+			const uint32_t offset_y = offset_x + component_size;
+			const uint32_t offset_z = offset_y + component_size;
+
+			const uint32_t transform_offset = transform_index * transform_size;
+
+			const uint32_t rotation_offset = transform_offset;
+
+			uint8_t* segment_data = m_data + segment.soa_start_offset;
+			uint8_t* rotation_data = segment_data + rotation_offset;
+			out_rotations_x = safe_ptr_cast<Vector4_32>(rotation_data + offset_x);
+			out_rotations_y = safe_ptr_cast<Vector4_32>(rotation_data + offset_y);
+			out_rotations_z = safe_ptr_cast<Vector4_32>(rotation_data + offset_z);
+		}
+
+		inline void track_database::get_rotations(const segment_context& segment, uint32_t transform_index, const Vector4_32*& out_rotations_x, const Vector4_32*& out_rotations_y, const Vector4_32*& out_rotations_z) const
+		{
+			Vector4_32* rotations_x;
+			Vector4_32* rotations_y;
+			Vector4_32* rotations_z;
+			const_cast<track_database*>(this)->get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z);
+
+			out_rotations_x = rotations_x;
+			out_rotations_y = rotations_y;
+			out_rotations_z = rotations_z;
 		}
 
 		inline void track_database::get_translations(const segment_context& segment, uint32_t transform_index, Vector4_32*& out_translations_x, Vector4_32*& out_translations_y, Vector4_32*& out_translations_z)

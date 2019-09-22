@@ -517,19 +517,33 @@ namespace acl
 			const Vector4_32 zero = vector_zero_32();
 
 			const bool has_scale = database.has_scale();
+			const RotationFormat8 rotation_format = database.get_rotation_format();
 			const uint32_t num_transforms = database.get_num_transforms();
 			const uint32_t num_soa_entries = segment.num_soa_entries;
 			for (uint32_t transform_index = 0; transform_index < num_transforms; ++transform_index)
 			{
 				qvvf_ranges& range = segment.ranges[transform_index];
 
-				Vector4_32* rotations_x;
-				Vector4_32* rotations_y;
-				Vector4_32* rotations_z;
-				Vector4_32* rotations_w;
-				database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
+				if (rotation_format == RotationFormat8::Quat_128)
+				{
+					Vector4_32* rotations_x;
+					Vector4_32* rotations_y;
+					Vector4_32* rotations_z;
+					Vector4_32* rotations_w;
+					database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
 
-				extract_vector4f_range(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries, range.rotation_min, range.rotation_max);
+					extract_vector4f_range(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries, range.rotation_min, range.rotation_max);
+				}
+				else
+				{
+					Vector4_32* rotations_x;
+					Vector4_32* rotations_y;
+					Vector4_32* rotations_z;
+					database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z);
+
+					extract_vector3f_range(rotations_x, rotations_y, rotations_z, num_soa_entries, range.rotation_min, range.rotation_max);
+				}
+
 				vector_unaligned_write(vector_sub(vector_unaligned_load(range.rotation_min), vector_unaligned_load(range.rotation_max)), range.rotation_extent);
 
 				Vector4_32* translations_x;
@@ -610,6 +624,7 @@ namespace acl
 			};
 
 			const bool has_scale = database.has_scale();
+			const RotationFormat8 rotation_format = database.get_rotation_format();
 			const uint32_t num_transforms = database.get_num_transforms();
 			const uint32_t num_soa_entries = segment.num_soa_entries;
 			for (uint32_t transform_index = 0; transform_index < num_transforms; ++transform_index)
@@ -617,13 +632,25 @@ namespace acl
 				qvvf_ranges& segment_range = segment.ranges[transform_index];
 
 				{
-					Vector4_32* rotations_x;
-					Vector4_32* rotations_y;
-					Vector4_32* rotations_z;
-					Vector4_32* rotations_w;
-					database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
+					if (rotation_format == RotationFormat8::Quat_128)
+					{
+						Vector4_32* rotations_x;
+						Vector4_32* rotations_y;
+						Vector4_32* rotations_z;
+						Vector4_32* rotations_w;
+						database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
 
-					extract_vector4f_range(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries, segment_range.rotation_min, segment_range.rotation_max);
+						extract_vector4f_range(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries, segment_range.rotation_min, segment_range.rotation_max);
+					}
+					else
+					{
+						Vector4_32* rotations_x;
+						Vector4_32* rotations_y;
+						Vector4_32* rotations_z;
+						database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z);
+
+						extract_vector3f_range(rotations_x, rotations_y, rotations_z, num_soa_entries, segment_range.rotation_min, segment_range.rotation_max);
+					}
 
 					Vector4_32 range_min = vector_unaligned_load(segment_range.rotation_min);
 					Vector4_32 range_max = vector_unaligned_load(segment_range.rotation_max);
@@ -827,6 +854,7 @@ namespace acl
 		inline void normalize_with_database_ranges(track_database& database, segment_context& segment, RangeReductionFlags8 range_reduction)
 		{
 			const bool has_scale = database.has_scale();
+			const RotationFormat8 rotation_format = database.get_rotation_format();
 			const uint32_t num_transforms = database.get_num_transforms();
 			const uint32_t num_soa_entries = segment.num_soa_entries;
 			for (uint32_t transform_index = 0; transform_index < num_transforms; ++transform_index)
@@ -835,13 +863,25 @@ namespace acl
 
 				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Rotations) && transform_range.is_rotation_animated())
 				{
-					Vector4_32* rotations_x;
-					Vector4_32* rotations_y;
-					Vector4_32* rotations_z;
-					Vector4_32* rotations_w;
-					database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
+					if (rotation_format == RotationFormat8::Quat_128)
+					{
+						Vector4_32* rotations_x;
+						Vector4_32* rotations_y;
+						Vector4_32* rotations_z;
+						Vector4_32* rotations_w;
+						database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
 
-					normalize_vector4f_track(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries, transform_range.rotation_min, transform_range.rotation_extent);
+						normalize_vector4f_track(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries, transform_range.rotation_min, transform_range.rotation_extent);
+					}
+					else
+					{
+						Vector4_32* rotations_x;
+						Vector4_32* rotations_y;
+						Vector4_32* rotations_z;
+						database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z);
+
+						normalize_vector3f_track(rotations_x, rotations_y, rotations_z, num_soa_entries, transform_range.rotation_min, transform_range.rotation_extent);
+					}
 
 					transform_range.are_rotations_normalized = true;
 				}
@@ -875,6 +915,7 @@ namespace acl
 		inline void normalize_with_segment_ranges(track_database& database, segment_context& segment, RangeReductionFlags8 range_reduction)
 		{
 			const bool has_scale = database.has_scale();
+			const RotationFormat8 rotation_format = database.get_rotation_format();
 			const uint32_t num_transforms = database.get_num_transforms();
 			const uint32_t num_soa_entries = segment.num_soa_entries;
 			for (uint32_t transform_index = 0; transform_index < num_transforms; ++transform_index)
@@ -883,13 +924,25 @@ namespace acl
 
 				if (are_any_enum_flags_set(range_reduction, RangeReductionFlags8::Rotations) && segment_range.is_rotation_animated())
 				{
-					Vector4_32* rotations_x;
-					Vector4_32* rotations_y;
-					Vector4_32* rotations_z;
-					Vector4_32* rotations_w;
-					database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
+					if (rotation_format == RotationFormat8::Quat_128)
+					{
+						Vector4_32* rotations_x;
+						Vector4_32* rotations_y;
+						Vector4_32* rotations_z;
+						Vector4_32* rotations_w;
+						database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z, rotations_w);
 
-					normalize_vector4f_track(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries, segment_range.rotation_min, segment_range.rotation_extent);
+						normalize_vector4f_track(rotations_x, rotations_y, rotations_z, rotations_w, num_soa_entries, segment_range.rotation_min, segment_range.rotation_extent);
+					}
+					else
+					{
+						Vector4_32* rotations_x;
+						Vector4_32* rotations_y;
+						Vector4_32* rotations_z;
+						database.get_rotations(segment, transform_index, rotations_x, rotations_y, rotations_z);
+
+						normalize_vector3f_track(rotations_x, rotations_y, rotations_z, num_soa_entries, segment_range.rotation_min, segment_range.rotation_extent);
+					}
 
 					segment_range.are_rotations_normalized = true;
 				}

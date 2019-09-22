@@ -144,6 +144,8 @@ namespace acl
 				if (settings.range_reduction != RangeReductionFlags8::None)
 					normalize_with_database_ranges(mutable_track_database, segment, settings.range_reduction);
 
+				// After this point, if the rotation quat W component is dropped, it is no longer meaningful
+
 				if (settings.segmenting.enabled && settings.segmenting.range_reduction != RangeReductionFlags8::None)
 				{
 					extract_segment_ranges(mutable_track_database, segment);
